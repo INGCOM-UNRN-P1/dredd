@@ -71,6 +71,30 @@ fi
         else
             printf "\nNo OK [$?]\n" >> mensaje.md
         fi
+
+        ##### Clang Toolchain (requiere de bear)
+        printf "\n#### clang\n" >> mensaje.md
+        printf "\n\`\`\`\n" >> mensaje.md
+        bear  -- clang -Wall -Wextra $c_file  >> mensaje.md 2>&1
+        exit_status=$?
+        printf "\n\`\`\`\n" >> mensaje.md
+        if [ $exit_status -eq 0 ]; then
+            printf "\nOK [$?]\n" >> mensaje.md
+        else
+            printf "\nNo OK [$?]\n" >> mensaje.md
+        fi
+
+        printf "\n#### clang-tidy\n" >> mensaje.md
+        printf "\n\`\`\`\n" >> mensaje.md
+        clang-tidy --config-file=tidy $c_file  >> mensaje.md 2>&1
+        exit_status=$?
+        printf "\n\`\`\`\n" >> mensaje.md
+        if [ $exit_status -eq 0 ]; then
+            printf "\nOK [$?]\n" >> mensaje.md
+        else
+            printf "\nNo OK [$?]\n" >> mensaje.md
+        fi
+
     done    
 
     cat informe/footer.md >> mensaje.md
