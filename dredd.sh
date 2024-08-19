@@ -24,7 +24,7 @@ fi
     
     printf "\n## Repositorio" >> mensaje.md
     printf "\n**branch/revision:** %s %s\n", "$(git -C $repo rev-parse --abbrev-ref HEAD)", "$(git -C $repo rev-parse --short HEAD)" >> mensaje.md   
-    printf "\nInforme creado el `date`\n"
+    printf "\nInforme creado el `date`\n" >> mensaje.md
        
     printf "\n### Archivos contenidos" >> mensaje.md    
     printf "\n\`\`\`" >> mensaje.md
@@ -60,6 +60,7 @@ fi
         else
             printf "\nNo OK [$?]\n" >> mensaje.md
         fi
+
         printf "\n#### splint\n" >> mensaje.md
         printf "\n\`\`\`\n" >> mensaje.md
         splint -hints +showscan +showalluses +stats -exportlocal $c_file >> mensaje.md 2>&1
@@ -70,7 +71,6 @@ fi
         else
             printf "\nNo OK [$?]\n" >> mensaje.md
         fi
-        
     done    
 
     cat informe/footer.md >> mensaje.md
