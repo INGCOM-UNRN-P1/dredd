@@ -53,7 +53,8 @@ fi
 
         printf "\n\`\`\`\n" >> mensaje.md
 
-        cppcheck --suppress=missingIncludeSystem --language=c --enable=all $c_file >> mensaje.md 2>&1
+        cppcheck --addon=chequeos.py --addon=naming --addon=findcasts --quiet --library=posix --language=c --enable=all $c_file >> mensaje.md 2>&1
+
         exit_status=$?
         printf "\n\`\`\`\n" >> mensaje.md
         if [ $exit_status -eq 0 ]; then
