@@ -21,18 +21,18 @@ fi
     echo "Creacion del informe"
     cat informe/header.md > mensaje.md
 
-    
+
     printf "\n## Repositorio" >> mensaje.md
     printf "\n**branch/revision:** %s %s\n", "$(git -C $repo rev-parse --abbrev-ref HEAD)", "$(git -C $repo rev-parse --short HEAD)" >> mensaje.md   
     printf "\nInforme creado el `date`\n" >> mensaje.md
-       
+
     printf "\n### Archivos contenidos" >> mensaje.md    
     printf "\n\`\`\`" >> mensaje.md
     ls -hl $repo >> mensaje.md
     printf "\n\`\`\`" >> mensaje.md
-    
+
     printf "\n## Analisis" >> mensaje.md
-    
+
     c_files=$(find $repo -name "*.c")
 
     for c_file in $c_files; do
@@ -48,11 +48,12 @@ fi
         else
             printf "\nNo OK [$?]\n" >> mensaje.md
         fi
-        
+
         printf "\n#### cppcheck\n" >> mensaje.md
-        
+
         printf "\n\`\`\`\n" >> mensaje.md
-        cppcheck --language=c --enable=style,warning $c_file >> mensaje.md 2>&1
+
+        cppcheck --suppress=missingIncludeSystem --language=c --enable=all $c_file >> mensaje.md 2>&1
         exit_status=$?
         printf "\n\`\`\`\n" >> mensaje.md
         if [ $exit_status -eq 0 ]; then
@@ -86,7 +87,7 @@ fi
 
         printf "\n#### clang-tidy\n" >> mensaje.md
         printf "\n\`\`\`\n" >> mensaje.md
-        clang-tidy --config-file=tidy $c_file  >> mensaje.md 2>&1
+        clang-tidy -header-filter=.*  --config-file=tidy $c_file  >> mensaje.md 2>&1
         exit_status=$?
         printf "\n\`\`\`\n" >> mensaje.md
         if [ $exit_status -eq 0 ]; then
