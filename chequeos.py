@@ -1,6 +1,17 @@
 import cppcheck
 
 @cppcheck.checker
+def globales(cfg, data):
+    for token in cfg.tokenlist:
+        if token.isName:
+            variable = token.variable 
+            if variable:
+                if variable.access == "Global":
+                    mensaje = f"No esta permitido el uso de variables globales, {token.str}"
+                    cppcheck.reportError(token, 'error', mensaje)
+
+
+@cppcheck.checker
 def ternario(cfg, data):
     for tok in cfg.tokenlist:
         if tok.str == "?":
