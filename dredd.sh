@@ -43,11 +43,7 @@ fi
         gcc -c -fanalyzer -Wall -Wextra $c_file -o a >> mensaje.md 2>&1
         exit_status=$?
         printf "\n\`\`\`\n" >> mensaje.md
-        if [ $exit_status -eq 0 ]; then
-            printf "\nOK [$?]\n" >> mensaje.md
-        else
-            printf "\nNo OK [$?]\n" >> mensaje.md
-        fi
+        printf "\n [$exit_status]\n" >> mensaje.md
 
         printf "\n#### cppcheck\n" >> mensaje.md
 
@@ -57,22 +53,14 @@ fi
 
         exit_status=$?
         printf "\n\`\`\`\n" >> mensaje.md
-        if [ $exit_status -eq 0 ]; then
-            printf "\nOK [$?]\n" >> mensaje.md
-        else
-            printf "\nNo OK [$?]\n" >> mensaje.md
-        fi
+        printf "\n [$exit_status]\n" >> mensaje.md
 
         printf "\n#### splint\n" >> mensaje.md
         printf "\n\`\`\`\n" >> mensaje.md
         splint -hints +showscan +showalluses +stats -exportlocal $c_file >> mensaje.md 2>&1
         exit_status=$?
         printf "\n\`\`\`\n" >> mensaje.md
-        if [ $exit_status -eq 0 ]; then
-            printf "\nOK [$?]\n" >> mensaje.md
-        else
-            printf "\nNo OK [$?]\n" >> mensaje.md
-        fi
+        printf "\n [$exit_status]\n" >> mensaje.md
 
         ##### Clang Toolchain (requiere de bear)
         printf "\n#### clang\n" >> mensaje.md
@@ -80,27 +68,19 @@ fi
         bear  -- clang -Wall -Wextra $c_file  >> mensaje.md 2>&1
         exit_status=$?
         printf "\n\`\`\`\n" >> mensaje.md
-        if [ $exit_status -eq 0 ]; then
-            printf "\nOK [$?]\n" >> mensaje.md
-        else
-            printf "\nNo OK [$?]\n" >> mensaje.md
-        fi
+        printf "\n [$exit_status]\n" >> mensaje.md
 
         printf "\n#### clang-tidy\n" >> mensaje.md
         printf "\n\`\`\`\n" >> mensaje.md
         clang-tidy -header-filter=.*  --config-file=tidy $c_file  >> mensaje.md 2>&1
         exit_status=$?
         printf "\n\`\`\`\n" >> mensaje.md
-        if [ $exit_status -eq 0 ]; then
-            printf "\nOK [$?]\n" >> mensaje.md
-        else
-            printf "\nNo OK [$?]\n" >> mensaje.md
-        fi
+        printf "\n [$exit_status]\n" >> mensaje.md
 
-    done    
+    done
 
     cat informe/footer.md >> mensaje.md
-        
+
     echo "Informe listo en $2.md"
     mv mensaje.md $2.md
 
