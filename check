@@ -1,0 +1,8 @@
+
+
+.PHONY: check
+check: 
+	@echo "ejecutando cppcheck con reglas personalizadas"
+	cppcheck --addon=../../../chequeos.py --addon=naming --addon=findcasts --quiet --library=posix --enable=all --suppress=missingIncludeSystem $(SRCS) $(HDRS) main.c prueba.c
+
+
