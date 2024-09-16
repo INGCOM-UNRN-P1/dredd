@@ -38,25 +38,31 @@ fi
 
     for ejercicio in $ejercicios; do
         echo "Procesando $ejercicio"
-        
+
         printf "\n### sobre \`${ejercicio}\n" >> mensaje.md
 
         printf "\n#### \`make clean\`\n" >> mensaje.md
         printf "\n\`\`\`\n" >> mensaje.md
-        make -C "$ejercicio" clean >> mensaje.md 2>&1
+        timeout --foreground 1m make -C "$ejercicio" clean >> mensaje.md 2>&1
+        exit_status=$?
         printf "\n\`\`\`\n" >> mensaje.md
+        printf "\n [$exit_status]\n" >> mensaje.md
 
         printf "\n#### \`make test\`\n" >> mensaje.md
         printf "\n\`\`\`\n" >> mensaje.md
-        make -C "$ejercicio" test >> mensaje.md 2>&1
+        timeout --foreground 1m make -C "$ejercicio" test >> mensaje.md 2>&1
+        exit_status=$?
         printf "\n\`\`\`\n" >> mensaje.md
-        
+        printf "\n [$exit_status]\n" >> mensaje.md
+
         printf "\n#### \`make check\`\n" >> mensaje.md
         cat check >> "$ejercicio"/Makefile
         printf "\n\`\`\`\n" >> mensaje.md
-        make -C "$ejercicio" check >> mensaje.md 2>&1
+        timeout --foreground 1m make -C "$ejercicio" check >> mensaje.md 2>&1
+        exit_status=$?
         printf "\n\`\`\`\n" >> mensaje.md
-        
+        printf "\n [$exit_status]\n" >> mensaje.md
+
 
     done
 
