@@ -3,3 +3,4 @@ tp*
 compile_commands.json
 
 /*.md
+.cache
