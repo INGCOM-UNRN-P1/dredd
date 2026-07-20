@@ -1,37 +1,313 @@
+#!/usr/bin/env python3
+"""
+Módulo verificador y addon de Cppcheck para evaluar estilo y reglas de programación en C.
+Combina la funcionalidad de análisis de estilo lineal y de estructura semántica usando Cppcheck.
+"""
+
 import os
-import sys
 import re
+import sys
 import subprocess
 from collections import defaultdict
+from pathlib import Path
 from shutil import which
+from typing import Dict, List, Tuple, Union, Optional
 
-# --- Helper para verificar herramientas ---
+# --- Soporte para ejecutarse como Addon de Cppcheck ---
+try:
+    import cppcheck
+    CPPCHECK_AVAILABLE = True
+except ModuleNotFoundError:
+    cppcheck = None
+    CPPCHECK_AVAILABLE = False
 
-def is_tool_installed(name):
-    """Verifica si una herramienta está en el PATH y es ejecutable."""
-    return which(name) is not None
 
-# --- Definiciones de las Reglas ---
+def checker(func):
+    """Decorador condicional para registrar funciones como chequeos de cppcheck si está disponible."""
+    if CPPCHECK_AVAILABLE and cppcheck:
+        return cppcheck.checker(func)
+    return func
 
-def check_regla_0x0000(line, line_num):
-    """Regla 0x0000h: Claridad y prolijidad (sin operadores compuestos)."""
-    compound_operators = r'(\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<=|>>=)'
-    line_no_comments = line.split('//')[0]
-    if re.search(compound_operators, line_no_comments):
-        return [(line_num, "Regla 0x0000h: Se encontró un operador compuesto. Prefiera expresiones explícitas para mayor claridad (ej. `x = x + 1` en lugar de `x += 1`).")]
+
+# --- Reglas AST implementadas como Addon de Cppcheck ---
+
+@checker
+def check_globales(cfg, data) -> None:
+    """Regla 0x000Bh: No está permitido el uso de variables globales."""
+    for token in cfg.tokenlist:
+        if token.isName:
+            variable = token.variable
+            if variable and variable.access == "Global":
+                mensaje = f"Regla 0x000Bh: No está permitido el uso de variables globales ({token.str})."
+                cppcheck.reportError(token, 'error', mensaje)
+
+
+@checker
+def check_ternario(cfg, data) -> None:
+    """Regla 0x0015h: No está permitido el uso del operador ternario '?:'."""
+    for tok in cfg.tokenlist:
+        if tok.str == "?":
+            mensaje = "Regla 0x0015h: No está permitido el uso del operador ternario '?:'."
+            cppcheck.reportError(tok, 'error', mensaje)
+
+
+@checker
+def check_lazos(cfg, data) -> None:
+    """Regla 0x0006h: No está permitido el uso de 'break' o 'continue' en lazos (excepto en switch)."""
+    for tok in cfg.tokenlist:
+        if tok.str in ("break", "continue"):
+            # Omitir break dentro de un bloque switch
+            # En Cppcheck, podemos subir en el scope para verificar si estamos en un switch
+            in_switch = False
+            scope = tok.scope
+            while scope:
+                if scope.type == "Switch":
+                    in_switch = True
+                    break
+                scope = scope.nestedIn
+            
+            if tok.str == "break" and in_switch:
+                continue
+
+            mensaje = f"Regla 0x0006h: No está permitido el uso de la manipulación de lazo '{tok.str}'."
+            cppcheck.reportError(tok, 'error', mensaje)
+
+
+@checker
+def check_compuesto(cfg, data) -> None:
+    """Regla 0x0000h: Evitar operadores compuestos para mayor claridad."""
+    for tok in cfg.tokenlist:
+        if tok.str in ("/=", "+=", "-=", "%=", "*="):
+            mensaje = f"Regla 0x0000h: Se encontró el operador compuesto '{tok.str}'. Prefiera expresiones explícitas (ej. x = x + 1)."
+            cppcheck.reportError(tok, 'warn', mensaje)
+
+
+@checker
+def check_retornos(cfg, data) -> None:
+    """Regla 0x0008h: Las funciones deben tener un único punto de retorno."""
+    for func in cfg.functions:
+        return_count = 0
+        pila = []
+        token = func.token
+
+        while token:
+            if token.str == "return":
+                return_count += 1
+
+            if token.str == "{":
+                pila.append(token.str)
+            elif token.str == "}":
+                if pila:
+                    pila.pop()
+                if not pila:
+                    break
+
+            token = token.next
+
+        if return_count > 1:
+            mensaje = f"Regla 0x0008h: La función '{func.name}' tiene múltiples retornos ({return_count}). Las funciones deben tener un solo punto de salida."
+            cppcheck.reportError(func.token, 'error', mensaje)
+
+
+# --- Reglas de análisis de texto / línea por línea (Verificador) ---
+
+def check_regla_0x0002(line: str, line_num: int) -> List[Tuple[int, str]]:
+    """Regla 0x0002h: Una declaración de variable por línea."""
+    if re.match(r'\s*for\s*\(', line):
+        return []
+    if re.search(r'\w+\s+\w+\s*,\s*\w+', line):
+        return [(line_num, "Regla 0x0002h: Se encontraron múltiples declaraciones de variables en una sola línea.")]
     return []
 
-def check_regla_0x0001(content):
-    """
-    Regla 0x0001h: Nombres de variables significativos.
-    Encuentra todas las variables y argumentos y devuelve una lista de tuplas (nombre, numero_linea).
-    """
+
+def check_regla_0x0004(line: str, line_num: int) -> List[Tuple[int, str]]:
+    """Regla 0x0004h: Un espacio antes y después de cada operador."""
+    operators = r'(\+|-|\*|/|%|==|!=|<=|>=|<|>|&&|\|\||&|\||\^|<<|>>|=)'
+    if re.search(r'[^\s]' + operators + r'[^\s=]', line):
+        if not re.search(r'(\+\+|--)', line):
+            return [(line_num, "Regla 0x0004h: Falta espacio antes y después de un operador.")]
+    if re.search(r'[^\s]\s' + operators + r'[^\s]', line):
+        return [(line_num, "Regla 0x0004h: Falta espacio antes de un operador.")]
+    if re.search(r'[^\s]' + operators + r'\s[^\s]', line):
+        return [(line_num, "Regla 0x0004h: Falta espacio después de un operador.")]
+    return []
+
+
+def check_regla_0x0005(line: str, line_num: int, lines: List[str]) -> List[Tuple[int, str]]:
+    """Regla 0x0005h: Todas las estructuras de control van con llaves en línea nueva."""
+    control_struct_pattern = re.compile(r'^\s*\b(if|for|while|switch)\s*\(.*\)')
+    do_pattern = re.compile(r'^\s*\bdo\b')
+    
+    line_strip = line.strip()
+    match = control_struct_pattern.match(line_strip)
+    do_match = do_pattern.match(line_strip)
+
+    if not match and not do_match:
+        return []
+
+    if do_match:
+        rest_of_line = line_strip[2:].strip()
+        if rest_of_line and not rest_of_line.startswith('//'):
+             return [(line_num, "Regla 0x0005h: La palabra clave `do` debe estar sola en su línea (excepto comentarios).")]
+        if line_num < len(lines):
+            if lines[line_num].strip() != '{':
+                return [(line_num, "Regla 0x0005h: A un `do` le debe seguir una llave de apertura `{` en una nueva línea.")]
+        else:
+            return [(line_num, "Regla 0x0005h: Bloque `do` incompleto al final del archivo.")]
+        return []
+
+    if match:
+        estructura = match.group(1)
+        if '{' in line_strip:
+            return [(line_num, f"Regla 0x0005h: La llave de apertura para `{estructura}` debe estar en una nueva línea.")]
+
+        # Buscar paréntesis de cierre para detectar sentencias en la misma línea
+        open_parens = 0
+        last_paren_idx = -1
+        in_string_or_char = False
+        string_char = ''
+        
+        start_pos = line_strip.find(estructura)
+        first_paren_pos = line_strip.find('(', start_pos)
+        
+        if first_paren_pos != -1:
+            for i in range(first_paren_pos, len(line_strip)):
+                char = line_strip[i]
+                if in_string_or_char:
+                    if char == string_char and (i == 0 or line_strip[i-1] != '\\'):
+                        in_string_or_char = False
+                elif char in ('"', "'"):
+                    in_string_or_char = True
+                    string_char = char
+                else:
+                    if char == '(':
+                        open_parens += 1
+                    elif char == ')':
+                        open_parens -= 1
+                
+                if open_parens == 0:
+                    last_paren_idx = i
+                    break
+
+        if last_paren_idx != -1:
+            code_after_condition = line_strip[last_paren_idx + 1:].strip()
+            if estructura == 'while' and code_after_condition == ';':
+                return []
+            if code_after_condition and not code_after_condition.startswith('//'):
+                return [(line_num, f"Regla 0x0005h: El cuerpo de la estructura `{estructura}` no debe estar en la misma línea que la condición. Use llaves en líneas separadas.")]
+
+        if line_num < len(lines):
+            next_line = lines[line_num].strip()
+            if next_line != '{':
+                return [(line_num, f"Regla 0x0005h: Bloque `{estructura}` debe usar llaves. La llave de apertura '{{' debe estar en la línea siguiente.")]
+        else:
+            return [(line_num, f"Regla 0x0005h: Bloque `{estructura}` incompleto al final del archivo.")]
+
+    return []
+
+
+def check_regla_0x000Eh(line: str, line_num: int) -> List[Tuple[int, str]]:
+    """Regla 0x000Eh: Los arreglos estáticos solo con tamaño fijo al compilar."""
+    if re.search(r'\w+\s+\w+\s*\[\s*[a-zA-Z_]\w*\s*\]', line):
+        return [(line_num, "Regla 0x000Eh: Se encontró un arreglo de longitud variable (VLA).")]
+    return []
+
+
+def check_regla_0x0010h(line: str, line_num: int) -> List[Tuple[int, str]]:
+    """Regla 0x0010h: Evitar condiciones ambiguas (truthyness)."""
+    if re.search(r'\b(if|while)\s*\(\s*[a-zA-Z_]\w*\s*\)', line):
+        return [(line_num, "Regla 0x0010h: Condición ambigua. Use una comparación explícita (ej. 'if (var != 0)').")]
+    return []
+
+
+def check_regla_0x0014h(line: str, line_num: int) -> List[Tuple[int, str]]:
+    """Regla 0x0014h: Sin instrucción 'goto'."""
+    if re.search(r'\bgoto\b', line):
+        return [(line_num, "Regla 0x0014h: Se encontró el uso de 'goto'.")]
+    return []
+
+
+def check_regla_0x0017h(line: str, line_num: int) -> List[Tuple[int, str]]:
+    """Regla 0x0017h: Nombres de funciones en snake_case."""
+    match = re.match(r'\w+\s+([a-zA-Z_]\w*)\s*\([^)]*\)\s*{', line)
+    if match:
+        func_name = match.group(1)
+        if not re.fullmatch(r'[a-z_][a-z0-9_]*', func_name) and func_name != 'main':
+            return [(line_num, f"Regla 0x0017h: El nombre de la función '{func_name}' no está en snake_case.")]
+    return []
+
+
+def check_regla_0x0018h(line: str, line_num: int) -> List[Tuple[int, str]]:
+    """Regla 0x0018h: Punteros con asterisco pegado al identificador."""
+    if re.search(r'\w+\s*\*\s+[a-zA-Z_]', line):
+        return [(line_num, "Regla 0x0018h: El asterisco del puntero debe estar junto al nombre de la variable (ej. 'int *ptr;').")]
+    return []
+
+
+def check_regla_0x001Bh(line: str, line_num: int) -> List[Tuple[int, str]]:
+    """Regla 0x001Bh: No mezclar asignación y comparación."""
+    if re.search(r'\b(if|while)\s*\(.*[^=]=[^=].*\)', line):
+        return [(line_num, "Regla 0x001Bh: Se encontró una asignación dentro de una condición.")]
+    return []
+
+
+def check_regla_0x001Ch(line: str, line_num: int) -> List[Tuple[int, str]]:
+    """Regla 0x001Ch: Prefieran fgets a gets."""
+    if re.search(r'\bgets\s*\(', line):
+        return [(line_num, "Regla 0x001Ch: Se encontró el uso de 'gets'. Prefiera 'fgets'.")]
+    return []
+
+
+def check_regla_0x002Eh(line: str, line_num: int) -> List[Tuple[int, str]]:
+    """Regla 0x002Eh: Las variables declaradas como const van en MAYÚSCULAS."""
+    match = re.search(r'\bconst\s+\w+\s+([a-zA-Z_]\w*)\s*=', line)
+    if match:
+        const_name = match.group(1)
+        if not re.fullmatch(r'[A-Z_][A-Z0-9_]*', const_name):
+            return [(line_num, f"Regla 0x002Eh: La constante '{const_name}' no está en MAYUSCULAS_SNAKE_CASE.")]
+    return []
+
+
+def check_regla_0xEEEE(content: str) -> List[Tuple[int, str]]:
+    """Regla 0xEEEEh: Indentación de 4 espacios, consistente con el bloque."""
+    errors = []
+    lines = content.replace('\t', '    ').split('\n')
+    indent_level = 0
+    
+    for i, line in enumerate(lines):
+        line_num = i + 1
+        stripped_line = line.strip()
+
+        if not stripped_line or stripped_line.startswith(('#', '//', '/*', '*', '*/')):
+            continue
+
+        current_check_level = indent_level
+        if stripped_line.startswith(('}', 'else', 'case', 'default')):
+            if current_check_level > 0:
+                current_check_level -= 1
+        
+        expected_indent = current_check_level * 4
+        leading_spaces = len(line) - len(line.lstrip(' '))
+
+        if leading_spaces % 4 != 0:
+            errors.append((line_num, f"Regla 0xEEEEh: La indentación debe ser un múltiplo de 4 espacios. Se encontraron {leading_spaces}."))
+        elif leading_spaces != expected_indent:
+            errors.append((line_num, f"Regla 0xEEEEh: Indentación inconsistente. Se esperaba {expected_indent} espacios, pero se encontraron {leading_spaces}."))
+
+        line_for_braces = re.sub(r'//.*|/\*.*?\*/|"[^"]*"|\'[^\']*\'', '', line)
+        indent_level += line_for_braces.count('{') - line_for_braces.count('}')
+        if indent_level < 0:
+            indent_level = 0
+            
+    return errors
+
+
+def check_regla_0x0001(content: str) -> List[Tuple[str, int]]:
+    """Regla 0x0001h: Extrae variables y argumentos para verificar nombres significativos."""
     variables_found = []
     lines = content.split('\n')
     func_def_pattern = re.compile(r'\w[\w\s\*]+\s*\(([^)]*)\)\s*{')
-    # Regex mejorada para detectar tipos comunes, incluyendo 'struct <nombre>'
     var_decl_pattern = re.compile(r'^\s*(?:const|static|extern|unsigned|signed|struct\s+\w+|void|int|char|float|double|short|long)\s+([^;]+);')
-    # --- MEJORA: Patrón para detectar declaraciones en bucles for ---
     for_loop_decl_pattern = re.compile(r'for\s*\(([^;]+);')
 
     for i, line in enumerate(lines):
@@ -40,11 +316,9 @@ def check_regla_0x0001(content):
         if not clean_line or clean_line.startswith('#'):
             continue
 
-        # --- MEJORA: Manejar declaraciones en bucles for ---
         for_match = for_loop_decl_pattern.search(clean_line)
         if for_match:
             init_part = for_match.group(1).strip()
-            # Verificar si es una declaración buscando un tipo de dato
             type_pattern = r'\b(const|static|extern|unsigned|signed|struct\s+\w+|void|int|char|float|double|short|long)\b'
             if re.search(type_pattern, init_part):
                 var_name_part = init_part.split('=')[0].strip()
@@ -58,207 +332,87 @@ def check_regla_0x0001(content):
         if match:
             params_str = match.group(1).strip()
             if params_str and params_str.lower() != 'void':
-                params = params_str.split(',')
-                for param in params:
-                    param = param.strip()
-                    parts = param.split()
+                for param in params_str.split(','):
+                    parts = param.strip().split()
                     if parts:
                         var_name = parts[-1].lstrip('*').split('[')[0]
                         if var_name:
                             variables_found.append((var_name, line_num))
         
-        # Excluir prototipos de funciones y llamadas a funciones de forma más segura
         elif not ('(' in clean_line and ')' in clean_line and '{' not in clean_line):
             match = var_decl_pattern.search(clean_line)
             if match:
                 declarations_str = match.group(1)
-                # Excluir si parece una llamada a función dentro de la declaración (caso borde)
                 if '(' in declarations_str and ')' in declarations_str:
                     continue
-                
-                declarations = declarations_str.split(',')
-                for decl in declarations:
-                    # Lógica de parseo mejorada y más clara para obtener el nombre
-                    # 1. Quitar la parte de la inicialización
+                for decl in declarations_str.split(','):
                     if '=' in decl:
                         decl = decl.split('=')[0]
-                    
-                    # 2. Quitar la parte de la definición de array
                     if '[' in decl:
                         decl = decl.split('[')[0]
-
-                    # 3. El nombre es la última palabra que queda
                     parts = decl.strip().split()
                     if parts:
-                        var_name = parts[-1]
-                        # 4. Quitar los asteriscos de puntero del nombre
-                        var_name = var_name.lstrip('*')
+                        var_name = parts[-1].lstrip('*')
                         if var_name:
                             variables_found.append((var_name, line_num))
                             
     return sorted(list(set(variables_found)), key=lambda x: x[1])
 
-def check_regla_0x0002(line, line_num):
-    """Regla 0x0002h: Una declaración de variable por línea."""
-    if re.match(r'\s*for\s*\(', line):
-        return []
-    if re.search(r'\w+\s+\w+\s*,\s*\w+', line):
-        return [(line_num, "Regla 0x0002h: Se encontraron múltiples declaraciones de variables en una sola línea.")]
-    return []
 
-def check_regla_0x0004(line, line_num):
-    """Regla 0x0004h: Un espacio antes y después de cada operador."""
-    operators = r'(\+|-|\*|/|%|==|!=|<=|>=|<|>|&&|\|\||&|\||\^|<<|>>|=)'
-    if re.search(r'[^\s]' + operators + r'[^\s=]', line):
-        if not re.search(r'(\+\+|--)', line):
-            return [(line_num, "Regla 0x0004h: Falta espacio antes y después de un operador.")]
-    if re.search(r'[^\s]\s' + operators + r'[^\s]', line):
-        return [(line_num, "Regla 0x0004h: Falta espacio antes de un operador.")]
-    if re.search(r'[^\s]' + operators + r'\s[^\s]', line):
-        return [(line_num, "Regla 0x0004h: Falta espacio después de un operador.")]
-    return []
-
-def check_regla_0x0005(line, line_num, lines):
-    """Regla 0x0005h: Todas las estructuras de control van con llaves en línea nueva."""
-    # Este regex encuentra estructuras de control que son seguidas por paréntesis.
-    control_struct_pattern = re.compile(r'^\s*\b(if|for|while|switch)\s*\(.*\)')
-    # 'do' es más simple y no usa paréntesis en su línea.
-    do_pattern = re.compile(r'^\s*\bdo\b')
-    
-    line_strip = line.strip()
-
-    match = control_struct_pattern.match(line_strip)
-    do_match = do_pattern.match(line_strip)
-
-    # Si no es una línea de estructura de control, salir.
-    if not match and not do_match:
-        return []
-
-    # --- Caso 1: palabra clave 'do' ---
-    if do_match:
-        # Verificar si hay algo más en la misma línea que 'do' (excepto comentarios)
-        rest_of_line = line_strip[len('do'):].strip()
-        if rest_of_line and not rest_of_line.startswith('//'):
-             return [(line_num, "Regla 0x0005h: La palabra clave `do` debe estar sola en su línea (excepto comentarios).")]
-        # Verificar que la siguiente línea no vacía sea una llave de apertura
-        if line_num < len(lines):
-            if lines[line_num].strip() != '{':
-                return [(line_num, "Regla 0x0005h: A un `do` le debe seguir una llave de apertura `{` en una nueva línea.")]
-        else: # 'do' es la última línea del archivo
-            return [(line_num, "Regla 0x0005h: Bloque `do` incompleto al final del archivo.")]
-        return [] # 'do' parece correcto
-
-    # --- Caso 2: if, for, while, switch ---
-    if match:
-        estructura = match.group(1)
-        
-        # Verificar si hay una llave de apertura en la misma línea (ej. "if(...) {")
-        if '{' in line_strip:
-            return [(line_num, f"Regla 0x0005h: La llave de apertura para `{estructura}` debe estar en una nueva línea.")]
-
-        # Encontrar el paréntesis de cierre de la condición para verificar si hay código en la misma línea.
-        open_parens = 0
-        last_paren_idx = -1
-        in_string_or_char = False
-        string_char = ''
-        
-        # Empezar la búsqueda después de la palabra clave
-        start_pos = line_strip.find(estructura)
-        first_paren_pos = line_strip.find('(', start_pos)
-        
-        if first_paren_pos != -1:
-            for i in range(first_paren_pos, len(line_strip)):
-                char = line_strip[i]
-                
-                if in_string_or_char:
-                    if char == string_char and (i == 0 or line_strip[i-1] != '\\'):
-                        in_string_or_char = False
-                elif char == '"' or char == "'":
-                    in_string_or_char = True
-                    string_char = char
-                elif not in_string_or_char:
-                    if char == '(': open_parens += 1
-                    elif char == ')': open_parens -= 1
-                
-                if open_parens == 0:
-                    last_paren_idx = i
-                    break
-
-        if last_paren_idx != -1:
-            code_after_condition = line_strip[last_paren_idx + 1:].strip()
-            
-            # Heurística para permitir bucles `do-while`, que terminan en `while(...);`
-            if estructura == 'while' and code_after_condition == ';':
-                return [] # Asumir que es un do-while válido y no seguir verificando.
-
-            # Esta es la verificación principal para el problema del usuario: `if(...) statement;`
-            if code_after_condition and not code_after_condition.startswith('//'):
-                return [(line_num, f"Regla 0x0005h: El cuerpo de la estructura `{estructura}` no debe estar en la misma línea que la condición. Use llaves en líneas separadas.")]
-
-        # Si la línea está bien, verificar que la siguiente línea tenga la llave de apertura.
-        if line_num < len(lines):
-            next_line = lines[line_num].strip()
-            if next_line != '{':
-                return [(line_num, f"Regla 0x0005h: Bloque `{estructura}` debe usar llaves. La llave de apertura '{'{'}' debe estar en la línea siguiente.")]
-        else: # Es la última línea del archivo
-            return [(line_num, f"Regla 0x0005h: Bloque `{estructura}` incompleto al final del archivo. Falta el cuerpo con llaves.")]
-
-    return []
-
-def check_regla_0x0006(line, line_num):
-    """Regla 0x0006h: Sin 'break' o 'continue' en lazos."""
-    if re.search(r'\b(break|continue)\b', line):
-        return [(line_num, "Regla 0x0006h: Se encontró el uso de 'break' o 'continue'.")]
-    return []
-
-def check_regla_0x0008(content):
-    """Regla 0x0008h: Una sola instrucción 'return' por función."""
+def check_regla_0x0030h(line: str, line_num: int) -> List[Tuple[int, str]]:
+    """Regla 0x0030h: Identificadores de variables y argumentos en snake_case."""
     errors = []
-    function_pattern = re.compile(r'\w+\s+\w+\s*\([^)]*\)\s*{', re.MULTILINE)
-    functions = function_pattern.finditer(content)
+    snake_case_pattern = re.compile(r'^[a-z_][a-z0-9_]*$')
+    clean_line = line.split('//')[0]
+
+    if not clean_line.strip() or clean_line.strip().startswith('#') or re.search(r'\bconst\b', clean_line):
+        return []
     
-    for func_match in functions:
-        start_index = func_match.end()
-        
-        open_braces = 1
-        end_index = -1
-        for i, char in enumerate(content[start_index:]):
-            if char == '{':
-                open_braces += 1
-            elif char == '}':
-                open_braces -= 1
-                if open_braces == 0:
-                    end_index = start_index + i
-                    break
-        
-        if end_index != -1:
-            function_body = content[start_index:end_index]
-            function_body_lines = function_body.split('\n')
-            body_start_line = content[:start_index].count('\n') + 1
-            
-            return_lines = []
-            for i, line in enumerate(function_body_lines):
-                if re.search(r'\breturn\b', line):
-                    return_lines.append(body_start_line + i)
-            
-            if len(return_lines) > 1:
-                # Reportar cada 'return' después del primero como un error individual
-                for i in range(1, len(return_lines)):
-                    line_num = return_lines[i]
-                    errors.append((line_num, f"Regla 0x0008h: Instrucción `return` adicional. Las funciones deben tener un solo punto de salida."))
+    for_loop_match = re.search(r'for\s*\(([^;]+);', clean_line)
+    if for_loop_match:
+        init_part = for_loop_match.group(1).strip()
+        type_pattern = r'\b(int|char|float|double|short|long|unsigned|signed|struct\s+\w+)\b'
+        if re.search(type_pattern, init_part):
+            var_name_part = init_part.split('=')[0].strip()
+            parts = var_name_part.split()
+            if parts:
+                var_name = parts[-1].lstrip('*').split('[')[0]
+                if var_name and not snake_case_pattern.fullmatch(var_name):
+                    errors.append((line_num, f"Regla 0x0030h: La variable '{var_name}' en el bucle for no está en snake_case."))
+
+    func_match = re.search(r'\(([^)]*)\)\s*{', clean_line)
+    if func_match:
+        params_str = func_match.group(1).strip()
+        if params_str and params_str.lower() != 'void':
+            for param in params_str.split(','):
+                parts = param.strip().split()
+                if parts:
+                    var_name = parts[-1].lstrip('*').split('[')[0]
+                    if var_name and not snake_case_pattern.fullmatch(var_name):
+                        errors.append((line_num, f"Regla 0x0030h: El argumento '{var_name}' no está en snake_case."))
+
+    var_decl_match = re.search(r'^\s*(?:static|extern|unsigned|signed|struct)?\s*\w+\s+([^;]+);', clean_line)
+    if var_decl_match:
+        declarations_str = var_decl_match.group(1)
+        if '(' not in declarations_str or ')' not in declarations_str:
+            for decl in declarations_str.split(','):
+                var_name = decl.strip().split('=')[0].strip().split('[')[0].strip()
+                if ' ' in var_name:
+                     var_name = var_name.split()[-1]
+                var_name = var_name.lstrip('*')
+                if var_name and not snake_case_pattern.fullmatch(var_name):
+                    errors.append((line_num, f"Regla 0x0030h: La variable '{var_name}' no está en snake_case."))
+
     return errors
 
-def check_regla_0x0009(content):
-    """
-    Regla 0x0009h: Las funciones no van con I/O a consola, a no ser que ese sea su propósito.
-    Devuelve un diccionario con las funciones que usan I/O y el conteo de cada llamada.
-    """
+
+def check_regla_0x0009(content: str) -> Dict[str, Dict[str, int]]:
+    """Regla 0x0009h: Las funciones no van con I/O a consola (printf, scanf, etc.)."""
     io_functions_in_code = {}
     io_keywords = ['printf', 'scanf', 'puts', 'gets', 'putchar', 'getchar']
     function_pattern = re.compile(r'(\w[\w\s\*]+\([^\)]*\))\s*{', re.MULTILINE)
-    functions = function_pattern.finditer(content)
-
-    for func_match in functions:
+    
+    for func_match in function_pattern.finditer(content):
         func_signature = " ".join(func_match.group(1).strip().split())
         if 'main' in func_signature:
             continue
@@ -267,7 +421,8 @@ def check_regla_0x0009(content):
         open_braces = 1
         end_index = -1
         for i, char in enumerate(content[start_index:]):
-            if char == '{': open_braces += 1
+            if char == '{':
+                open_braces += 1
             elif char == '}':
                 open_braces -= 1
                 if open_braces == 0:
@@ -286,20 +441,19 @@ def check_regla_0x0009(content):
                 
     return io_functions_in_code
 
-def check_regla_0x000A(content):
-    """
-    Regla 0x000Ah: Revisa la documentación de todas las funciones.
-    Devuelve una lista de tuplas (firma, comentario, linea), donde comentario es None si está ausente.
-    """
+
+def check_regla_0x000A(content: str) -> List[Tuple[str, Optional[str], int]]:
+    """Regla 0x000Ah: Revisa que todas las funciones posean comentarios de documentación."""
     
-    def capture_preceding_comment(lines, func_line_index):
+    def capture_preceding_comment(lines: List[str], func_line_index: int) -> Optional[str]:
         comment_lines = []
         current_index = func_line_index - 1
 
         while current_index >= 0 and not lines[current_index].strip():
             current_index -= 1
 
-        if current_index < 0: return None
+        if current_index < 0:
+            return None
         line = lines[current_index].strip()
 
         if line.endswith('*/'):
@@ -323,7 +477,8 @@ def check_regla_0x000A(content):
                 if prev_line_stripped.startswith('//'):
                     comment_lines.append(lines[current_index])
                     current_index -= 1
-                else: break
+                else:
+                    break
             return "\n".join(reversed(comment_lines))
         return None
 
@@ -340,305 +495,100 @@ def check_regla_0x000A(content):
                 comment = capture_preceding_comment(lines, i)
                 functions_with_docs.append((full_signature, comment, i + 1))
         
-        if '{' in line:
-            brace_level += line.count('{')
-        if '}' in line:
-            brace_level -= line.count('}')
+        brace_level += line.count('{') - line.count('}')
             
     unique_functions = {}
     for sig, doc, line_num in functions_with_docs:
-        if sig not in unique_functions or (sig in unique_functions and unique_functions[sig][0] is None):
+        if sig not in unique_functions or unique_functions[sig][0] is None:
              unique_functions[sig] = (doc, line_num)
 
     return sorted([(sig, data[0], data[1]) for sig, data in unique_functions.items()])
 
 
-def check_regla_0x000B(line, line_num, in_function):
-    """Regla 0x000Bh: Sin usar variables globales."""
-    if not in_function and re.match(r'\s*(int|char|float|double|short|long|void|struct)\s+\w+', line):
-         if not re.search(r'\(.*\)', line):
-            return [(line_num, "Regla 0x000Bh: Se detectó una posible variable global.")]
-    return []
+# --- Procesamiento e integración ---
 
-def check_regla_0x000E(line, line_num):
-    """Regla 0x000Eh: Los arreglos estáticos solo con tamaño fijo al compilar."""
-    if re.search(r'\w+\s+\w+\s*\[\s*[a-zA-Z_]\w*\s*\]', line):
-        return [(line_num, "Regla 0x000Eh: Se encontró un arreglo de longitud variable (VLA).")]
-    return []
-
-def check_regla_0x0010(line, line_num):
-    """Regla 0x0010h: Evitar condiciones ambiguas (truthyness)."""
-    if re.search(r'\b(if|while)\s*\(\s*[a-zA-Z_]\w*\s*\)', line):
-        return [(line_num, "Regla 0x0010h: Condición ambigua. Use una comparación explícita (ej. 'if (var != 0)').")]
-    return []
-
-def check_regla_0x0014(line, line_num):
-    """Regla 0x0014h: Sin instrucción 'goto'."""
-    if re.search(r'\bgoto\b', line):
-        return [(line_num, "Regla 0x0014h: Se encontró el uso de 'goto'.")]
-    return []
-
-def check_regla_0x0015(line, line_num):
-    """Regla 0x0015h: Sin operador condicional (ternario) '?:'."""
-    if re.search(r'\?\s*.*\s*:', line):
-        return [(line_num, "Regla 0x0015h: Se encontró el uso del operador ternario '?:'.")]
-    return []
-    
-def check_regla_0x0017(line, line_num):
-    """Regla 0x0017h: Nombres de funciones en snake_case."""
-    match = re.match(r'\w+\s+([a-zA-Z_]\w*)\s*\([^)]*\)\s*{', line)
-    if match:
-        func_name = match.group(1)
-        if not re.fullmatch(r'[a-z_][a-z0-9_]*', func_name) and func_name != 'main':
-            return [(line_num, f"Regla 0x0017h: El nombre de la función '{func_name}' no está en snake_case.")]
-    return []
-
-def check_regla_0x0018(line, line_num):
-    """Regla 0x0018h: Punteros con asterisco pegado al identificador."""
-    if re.search(r'\w+\s*\*\s+[a-zA-Z_]', line):
-        return [(line_num, "Regla 0x0018h: El asterisco del puntero debe estar junto al nombre de la variable (ej. 'int *ptr;').")]
-    return []
-
-def check_regla_0x001B(line, line_num):
-    """Regla 0x001Bh: No mezclar asignación y comparación."""
-    if re.search(r'\b(if|while)\s*\(.*[^=]=[^=].*\)', line):
-        return [(line_num, "Regla 0x001Bh: Se encontró una asignación dentro de una condición.")]
-    return []
-
-def check_regla_0x001C(line, line_num):
-    """Regla 0x001Ch: Prefieran fgets a gets."""
-    if re.search(r'\bgets\s*\(', line):
-        return [(line_num, "Regla 0x001Ch: Se encontró el uso de 'gets'. Prefiera 'fgets'.")]
-    return []
-
-def check_regla_0x002E(line, line_num):
-    """Regla 0x002Eh: Las variables declaradas como const van en MAYUSCULAS."""
-    match = re.search(r'\bconst\s+\w+\s+([a-zA-Z_]\w*)\s*=', line)
-    if match:
-        const_name = match.group(1)
-        if not re.fullmatch(r'[A-Z_][A-Z0-9_]*', const_name):
-            return [(line_num, f"Regla 0x002Eh: La constante '{const_name}' no está en MAYUSCULAS_SNAKE_CASE.")]
-    return []
-
-def check_regla_0x0030h(line, line_num):
-    """Regla 0x0030h: Identificadores de variables y argumentos en snake_case."""
-    errors = []
-    snake_case_pattern = re.compile(r'^[a-z_][a-z0-9_]*$')
-    clean_line = line.split('//')[0]
-
-    if not clean_line.strip() or clean_line.strip().startswith('#'):
-        return []
-    
-    if re.search(r'\bconst\b', clean_line):
-        return []
-
-    # --- MEJORA: Manejar declaraciones en bucles for ---
-    for_loop_match = re.search(r'for\s*\(([^;]+);', clean_line)
-    if for_loop_match:
-        init_part = for_loop_match.group(1).strip()
-        type_pattern = r'\b(int|char|float|double|short|long|unsigned|signed|struct\s+\w+)\b'
-        if re.search(type_pattern, init_part):
-            var_name_part = init_part.split('=')[0].strip()
-            parts = var_name_part.split()
-            if parts:
-                var_name = parts[-1].lstrip('*').split('[')[0]
-                if var_name and not snake_case_pattern.fullmatch(var_name):
-                    errors.append((line_num, f"Regla 0x0030h: La variable '{var_name}' en el bucle for no está en snake_case."))
-
-    func_match = re.search(r'\(([^)]*)\)\s*{', clean_line)
-    if func_match:
-        params_str = func_match.group(1).strip()
-        if params_str and params_str.lower() != 'void':
-            params = params_str.split(',')
-            for param in params:
-                param = param.strip()
-                parts = param.split()
-                if parts:
-                    var_name = parts[-1].lstrip('*').split('[')[0]
-                    if var_name and not snake_case_pattern.fullmatch(var_name):
-                        errors.append((line_num, f"Regla 0x0030h: El argumento '{var_name}' no está en snake_case."))
-
-    var_decl_match = re.search(r'^\s*(?:static|extern|unsigned|signed|struct)?\s*\w+\s+([^;]+);', clean_line)
-    if var_decl_match:
-        declarations_str = var_decl_match.group(1)
-        if '(' in declarations_str and ')' in declarations_str:
-            return errors
-
-        declarations = declarations_str.split(',')
-        for decl in declarations:
-            var_name = decl.strip().split('=')[0].strip().split('[')[0].strip()
-            if ' ' in var_name:
-                 var_name = var_name.split()[-1]
-            var_name = var_name.lstrip('*')
-            
-            if var_name and not snake_case_pattern.fullmatch(var_name):
-                errors.append((line_num, f"Regla 0x0030h: La variable '{var_name}' no está en snake_case."))
-
-    return errors
-
-def check_regla_0xEEEE(content):
-    """Regla 0xEEEEh: Indentación de 4 espacios, consistente con el bloque."""
-    errors = []
-    # Reemplazar tabs con 4 espacios para un análisis consistente
-    lines = content.replace('\t', '    ').split('\n')
-    indent_level = 0
-    
-    for i, line in enumerate(lines):
-        line_num = i + 1
-        stripped_line = line.strip()
-
-        # Ignorar líneas vacías, comentarios de una sola línea y directivas de preprocesador
-        if not stripped_line or stripped_line.startswith('#') or stripped_line.startswith('//'):
-            continue
-        
-        # Ignorar comentarios multilínea por simplicidad (pueden tener su propio formato)
-        if stripped_line.startswith(('/*', '*', '*/')):
-            continue
-
-        # Una línea con una llave de cierre (o 'else', 'case') debe estar desindentada
-        # al nivel del bloque que la contiene, antes de procesar la línea.
-        current_check_level = indent_level
-        if stripped_line.startswith(('}', 'else', 'case', 'default')):
-            if current_check_level > 0:
-                current_check_level -= 1
-        
-        expected_indent = current_check_level * 4
-        leading_spaces = len(line) - len(line.lstrip(' '))
-
-        # 1. Verificar si la indentación es un múltiplo de 4
-        if leading_spaces % 4 != 0:
-            errors.append((line_num, f"Regla 0xEEEEh: La indentación debe ser un múltiplo de 4 espacios. Se encontraron {leading_spaces}."))
-        # 2. Verificar si la indentación es consistente con el nivel del bloque
-        elif leading_spaces != expected_indent:
-            errors.append((line_num, f"Regla 0xEEEEh: Indentación inconsistente. Se esperaba {expected_indent} espacios, pero se encontraron {leading_spaces}."))
-
-        # Actualizar el nivel de indentación para la siguiente línea
-        # Contar llaves que no estén en comentarios o cadenas
-        line_for_braces = re.sub(r'//.*|/\*.*?\*/|"[^"]*"|\'[^\']*\'', '', line)
-        open_braces = line_for_braces.count('{')
-        close_braces = line_for_braces.count('}')
-        indent_level += open_braces
-        indent_level -= close_braces
-        
-        # Prevenir niveles de indentación negativos en caso de código malformado
-        if indent_level < 0:
-            indent_level = 0
-            
-    return errors
-
-# --- Procesador de Archivos ---
-
-def compile_file(filepath):
-    """Compila un archivo C con GCC y devuelve la salida de errores y advertencias."""
-    # Usar os.devnull para ser compatible con Windows y Linux/macOS
-    output_binary = os.devnull 
+def compile_file(filepath: Path) -> str:
+    """Compila un archivo C con GCC y retorna la salida de stderr."""
     command = [
-        'gcc', 
-        '-Wall', 
-        '-Wextra', 
-        '-std=c23', 
-        '-pedantic', 
-        '-Wmissing-prototypes', 
-        '-Wstrict-prototypes', 
-        '-fanalyzer',
-        filepath, 
-        '-o', 
-        output_binary
+        'gcc', '-Wall', '-Wextra', '-std=c23', '-pedantic',
+        '-Wmissing-prototypes', '-Wstrict-prototypes', '-fanalyzer',
+        str(filepath), '-o', os.devnull
     ]
     try:
-        # Ejecuta el comando de compilación
         result = subprocess.run(command, capture_output=True, text=True, timeout=15)
-        # Los errores y advertencias de GCC se emiten en stderr, que es lo que devolvemos.
         return result.stderr
     except FileNotFoundError:
-        return "Error: El compilador 'gcc' no se encontró en el PATH del sistema. No se pudo realizar la compilación."
+        return "Error: GCC no se encuentra en el PATH."
     except subprocess.TimeoutExpired:
-        return "Error: El proceso de compilación tardó demasiado (más de 15s) y fue terminado."
+        return "Error: Tiempo de compilación excedido (15s)."
     except Exception as e:
-        return f"Ocurrió un error inesperado durante la compilación: {e}"
+        return f"Error inesperado en compilación: {e}"
 
-def run_cppcheck(filepath):
-    """Ejecuta Cppcheck en un archivo y devuelve la salida de errores."""
+
+def run_cppcheck(filepath: Path) -> str:
+    """Ejecuta Cppcheck utilizando este mismo script unificado como addon."""
+    current_script = Path(__file__).resolve()
     command = [
         'cppcheck',
         '--enable=all',
+        f'--addon={current_script}',
         '--check-level=exhaustive',
-        '--suppress=missingIncludeSystem',  # Suprime errores de headers no encontrados
+        '--suppress=missingIncludeSystem',
         '--template=[{severity}] {file}:{line}: {id}: {message}',
-        filepath
+        str(filepath)
     ]
     try:
-        # Cppcheck escribe sus resultados en stderr
         result = subprocess.run(command, capture_output=True, text=True, timeout=20)
         return result.stderr
     except FileNotFoundError:
-        # Este caso es manejado por is_tool_installed, pero es una salvaguarda.
-        return "Error: 'cppcheck' no encontrado."
+        return "Error: Cppcheck no se encuentra en el PATH."
     except subprocess.TimeoutExpired:
-        return "Error: El análisis con Cppcheck tardó demasiado y fue terminado."
+        return "Error: Tiempo de Cppcheck excedido (20s)."
     except Exception as e:
-        return f"Ocurrió un error inesperado al ejecutar Cppcheck: {e}"
+        return f"Error al ejecutar Cppcheck: {e}"
 
-def analyze_file(filepath):
-    """Analiza un único archivo C y devuelve un diccionario con los resultados."""
+
+def analyze_file(filepath: Path) -> Dict[str, Union[List, Dict, str]]:
+    """Analiza un archivo de C y devuelve el reporte estructurado de fallas y estilo."""
     errors = []
     file_content = ""
-    # --- MEJORA: Intentar leer el archivo con varias codificaciones comunes ---
-    encodings_to_try = ['utf-8', 'latin-1', 'cp1252']
+    encodings = ['utf-8', 'latin-1', 'cp1252']
     
-    for encoding in encodings_to_try:
+    for encoding in encodings:
         try:
             with open(filepath, 'r', encoding=encoding) as f:
                 file_content = f.read()
-            break # Si la lectura es exitosa, salimos del bucle
+            break
         except UnicodeDecodeError:
-            continue # Si falla esta codificación, probamos la siguiente
+            continue
         except Exception as e:
-            # Para otros errores (ej. archivo no encontrado), reportamos y salimos
-            msg = f"Error al leer el archivo: {e}"
+            msg = f"Error al leer archivo: {e}"
             return {'errors': [(0, msg)], 'variables': [], 'io_functions': {}, 'functions_documentation': [], 'content': msg}
 
-    # Si después de todos los intentos no se pudo leer el archivo
     if not file_content:
-        msg = f"No se pudo decodificar el archivo con las codificaciones probadas: {', '.join(encodings_to_try)}"
+        msg = f"No se pudo decodificar el archivo {filepath.name}."
         return {'errors': [(0, msg)], 'variables': [], 'io_functions': {}, 'functions_documentation': [], 'content': msg}
 
     lines = file_content.split('\n')
     
-    # --- Ejecutar reglas que analizan el contenido completo ---
     variables_info = check_regla_0x0001(file_content)
     io_functions_info = check_regla_0x0009(file_content)
     functions_documentation_info = check_regla_0x000A(file_content)
-    errors.extend(check_regla_0x0008(file_content))
-    errors.extend(check_regla_0xEEEE(file_content)) # <- NUEVA REGLA DE INDENTACIÓN
+    errors.extend(check_regla_0xEEEE(file_content))
 
-    # --- Ejecutar reglas que analizan línea por línea ---
-    in_function = False
-    brace_level = 0
     for i, line in enumerate(lines):
         line_num = i + 1
-        if '{' in line:
-            brace_level += line.count('{')
-            if brace_level > 0: in_function = True
-        if '}' in line:
-            brace_level -= line.count('}')
-            if brace_level == 0: in_function = False
-
-        errors.extend(check_regla_0x0000(line, line_num)) # <- NUEVA REGLA DE CLARIDAD
         errors.extend(check_regla_0x0002(line, line_num))
         errors.extend(check_regla_0x0004(line, line_num))
         errors.extend(check_regla_0x0005(line, line_num, lines))
-        errors.extend(check_regla_0x0006(line, line_num))
-        errors.extend(check_regla_0x000B(line, line_num, in_function))
-        errors.extend(check_regla_0x000E(line, line_num))
-        errors.extend(check_regla_0x0010(line, line_num))
-        errors.extend(check_regla_0x0014(line, line_num))
-        errors.extend(check_regla_0x0015(line, line_num))
-        errors.extend(check_regla_0x0017(line, line_num))
-        errors.extend(check_regla_0x0018(line, line_num))
-        errors.extend(check_regla_0x001B(line, line_num))
-        errors.extend(check_regla_0x001C(line, line_num))
-        errors.extend(check_regla_0x002E(line, line_num))
+        errors.extend(check_regla_0x000Eh(line, line_num))
+        errors.extend(check_regla_0x0010h(line, line_num))
+        errors.extend(check_regla_0x0014h(line, line_num))
+        errors.extend(check_regla_0x0017h(line, line_num))
+        errors.extend(check_regla_0x0018h(line, line_num))
+        errors.extend(check_regla_0x001Bh(line, line_num))
+        errors.extend(check_regla_0x001Ch(line, line_num))
+        errors.extend(check_regla_0x002Eh(line, line_num))
         errors.extend(check_regla_0x0030h(line, line_num))
         
     return {
@@ -649,47 +599,47 @@ def analyze_file(filepath):
         'content': file_content
     }
 
-def main():
-    """Función principal del script."""
+
+def main() -> None:
+    """Orquestador principal para analizar directorios de estudiantes."""
     if len(sys.argv) != 2:
-        print("Uso: python verificar_estilo.py <ruta_al_directorio_base>")
+        print("Uso: python verificador.py <ruta_al_directorio_base>")
         sys.exit(1)
 
-    base_folder = sys.argv[1]
-    if not os.path.isdir(base_folder):
+    base_folder = Path(sys.argv[1])
+    if not base_folder.is_dir():
         print(f"Error: La ruta '{base_folder}' no es una carpeta válida.")
         sys.exit(1)
 
-    # --- Verificar herramientas una sola vez al inicio ---
-    cppcheck_installed = is_tool_installed('cppcheck')
+    cppcheck_installed = which('cppcheck') is not None
     if not cppcheck_installed:
-        print("Advertencia: 'cppcheck' no está instalado o no se encuentra en el PATH. Se omitirá este análisis.")
+        print("Advertencia: 'cppcheck' no está instalado en el PATH. Se omitirá el análisis estructural.")
 
-    for student_dir_name in sorted(os.listdir(base_folder)):
-        student_dir_path = os.path.join(base_folder, student_dir_name)
-        if not os.path.isdir(student_dir_path):
+    for student_dir in sorted(base_folder.iterdir()):
+        if not student_dir.is_dir():
             continue
 
-        report_content = f"# Informe de Estilo para: {student_dir_name}\n\n"
-        report_content += "\n\n**OBSERVACIÓN IMPORTANTE**\nEsto es una verificación automática de las reglas\n"
-        c_files_to_analyze = []
-        for root, _, files in os.walk(student_dir_path):
-            for file in files:
-                if file.endswith(".c"):
-                    c_files_to_analyze.append(os.path.join(root, file))
-
-        if not c_files_to_analyze:
+        student_name = student_dir.name
+        report_content = (
+            f"# Informe de Estilo para: {student_name}\n\n"
+            "**OBSERVACIÓN IMPORTANTE**\nEsto es una verificación automática de las reglas.\n"
+        )
+        
+        c_files = sorted(student_dir.glob("**/*.c"))
+        if not c_files:
             report_content += "No se encontraron archivos `.c` para analizar en este directorio.\n"
         
-        for filepath in sorted(c_files_to_analyze):
+        for filepath in c_files:
             analysis = analyze_file(filepath)
-            relative_filepath = os.path.relpath(filepath, student_dir_path)
+            relative_filepath = filepath.relative_to(student_dir)
             
-            report_content += f"## Verificando: `{relative_filepath}`\n\n"
-            report_content += "```c\n"
-            report_content += analysis['content']
-            report_content += "\n```\n\n"
-            report_content += "### Estilo\n\n"
+            report_content += (
+                f"## Verificando: `{relative_filepath}`\n\n"
+                "```c\n"
+                f"{analysis['content']}\n"
+                "```\n\n"
+                "### Estilo\n\n"
+            )
 
             errors = analysis['errors']
             variables = analysis['variables']
@@ -711,7 +661,7 @@ def main():
                         else:
                             report_content += f"- **Línea {line_num}:** `{name}`\n"
                     if not suspicious_found:
-                         report_content += "\nTodos los identificadores _parecen_ se ven a simple vista, descriptivos.\n"
+                         report_content += "\nTodos los identificadores parecen descriptivos a simple vista.\n"
                     report_content += "\n"
 
                 if io_functions:
@@ -726,9 +676,10 @@ def main():
                     for func_sig, comment, line_num in funcs_documentation:
                         report_content += f"##### Firma: `{func_sig}`\n\n"
                         if comment:
-                            report_content += "**Comentario Encontrado:**\n\n"
-                            comment_in_quote = "\n".join([f"{line}" for line in comment.split('\n')])
-                            report_content += f"\n```c\n{comment_in_quote}\n{func_sig}\n```\n\n"
+                            report_content += (
+                                "**Comentario Encontrado:**\n\n"
+                                f"```c\n{comment}\n{func_sig}\n```\n\n"
+                            )
                         else:
                             report_content += f"**ADVERTENCIA (Línea {line_num}):** No se encontró un comentario de documentación para esta función/prototipo.\n\n"
                         report_content += "---\n"
@@ -745,36 +696,29 @@ def main():
                              report_content += f"- **Línea {line_num}:** {msg.split(':', 1)[1].strip()}\n"
                         report_content += "\n"
             
-            # --- NUEVA SECCIÓN DE COMPILACIÓN ---
             report_content += "### Resultado de Compilación (GCC)\n\n"
             compilation_output = compile_file(filepath)
             if compilation_output.strip():
-                report_content += "```text\n"
-                report_content += compilation_output.strip()
-                report_content += "\n```\n\n"
+                report_content += f"```text\n{compilation_output.strip()}\n```\n\n"
             else:
                 report_content += "Compilación exitosa sin advertencias.\n\n"
             
-            # --- NUEVA SECCIÓN DE ANÁLISIS CON CPPCHECK ---
             if cppcheck_installed:
-                report_content += "### Análisis con Cppcheck\n\n"
+                report_content += "### Análisis con Cppcheck (con Reglas de Estilo AST)\n\n"
                 cppcheck_output = run_cppcheck(filepath)
                 if cppcheck_output.strip():
-                    report_content += "```text\n"
-                    report_content += cppcheck_output.strip()
-                    report_content += "\n```\n\n"
+                    report_content += f"```text\n{cppcheck_output.strip()}\n```\n\n"
                 else:
                     report_content += "Cppcheck no encontró problemas.\n\n"
 
-
-        report_path = os.path.join(student_dir_path, f"{student_dir_name}.md")
+        report_path = student_dir / f"{student_name}.md"
         try:
             with open(report_path, "w", encoding="utf-8") as report_file:
                 report_file.write(report_content)
-            print(f"Análisis completado para '{student_dir_name}'. Informe guardado en: '{report_path}'")
+            print(f"Análisis completado para '{student_name}'. Informe guardado en: '{report_path}'")
         except IOError as e:
-            print(f"Error al escribir el informe para '{student_dir_name}': {e}")
+            print(f"Error al escribir el informe para '{student_name}': {e}")
+
 
 if __name__ == "__main__":
     main()
-
