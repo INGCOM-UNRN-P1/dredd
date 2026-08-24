@@ -177,18 +177,41 @@ def cmd_pr_fix(
 
 
 
+@app.command("map")
+def cmd_map(
+    activity: str = typer.Argument(..., help="Nombre / slug de la actividad a mapear (ej. tp01, entrega-1)."),
+    exercises: Optional[List[str]] = typer.Option(None, "--exercise", "-e", help="Nombres de los ejercicios disponibles (ej. -e ej1 -e ej2)."),
+    unmapped_only: bool = typer.Option(False, "--unmapped-only", "-u", help="Revisar únicamente archivos no vinculados."),
+    auto: bool = typer.Option(False, "--auto", "-a", help="Aplicar coincidencias heurísticas obvias automáticamente."),
+) -> None:
+    """Mapeo interactivo y heurístico entre archivos C de estudiantes y casos de prueba."""
+    from dredd.core.mapping import InteractiveMapper
+
+    mapper = InteractiveMapper(Path.cwd(), activity, console=console)
+    avail = list(exercises) if exercises else ["ejercicio1", "ejercicio2", "ejercicio3"]
+    changes = mapper.run_interactive_session(avail, unmapped_only=unmapped_only, auto_apply=auto)
+    console.print(f"[bold green]✓ Sesión finalizada: {changes} mapeo(s) actualizados.[/bold green]")
+
+
 @moodle_app.command("ingest")
 def cmd_moodle_ingest(
     zip_file: Path = typer.Argument(..., help="Archivo ZIP descargado de Moodle con las entregas de la tarea."),
-    exercise: str = typer.Option(..., "--exercise", "-e", help="Nombre del ejercicio o TP."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Solo simular la extracción sin escribir en disco."),
 ) -> None:
-    """Descomprime un archivo ZIP masivo de Moodle organizándolo en <ejercicio>-submissions/."""
+    """Descomprime, normaliza a UTF-8 y versiona (SHA-256) entregas masivas de Moodle."""
+    from dredd.core.ingest import MoodleIngestor
+
     if not zip_file.is_file():
         console.print(f"[bold red]Archivo ZIP inexistente: {zip_file}[/bold red]")
         raise typer.Exit(code=1)
 
-    students = unpack_moodle_zip(zip_file, exercise, Path.cwd())
-    console.print(f"\n[bold green]✓ {len(students)} entregas extraídas con éxito en {exercise}-submissions/[/bold green]\n")
+    ingestor = MoodleIngestor(Path.cwd())
+    info, results = ingestor.process_zip(zip_file, dry_run=dry_run)
+
+    new_revs = sum(1 for r in results if r.is_new_revision)
+    console.print(f"\n[bold green]✓ Ingesta completada para '{info.activity_name}' ({info.activity_slug})[/bold green]")
+    console.print(f"  · Estudiantes procesados: {len(results)}")
+    console.print(f"  · Nuevas revisiones creadas: {new_revs}\n")
 
 
 @moodle_app.command("export")
@@ -199,13 +222,17 @@ def cmd_moodle_export(
     """Exporta las calificaciones a un archivo CSV compatible con Moodle."""
     submissions_dir = Path.cwd() / f"{exercise}-submissions"
     if not submissions_dir.is_dir():
+        # Fallback a directorio de actividad directo
+        submissions_dir = Path.cwd() / exercise
+
+    if not submissions_dir.is_dir():
         console.print(f"[bold red]Directorio inexistente: {submissions_dir}[/bold red]")
         raise typer.Exit(code=1)
 
-    # Exportar planilla básica
     export_grades_csv(exercise, submissions_dir, output, grades_map={})
     console.print(f"\n[bold green]✓ Planilla generada en: {output}[/bold green]\n")
 
 
 if __name__ == "__main__":
     app()
+
