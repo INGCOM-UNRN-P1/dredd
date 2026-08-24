@@ -152,8 +152,29 @@ def cmd_plagiarism(
             f"{m.shared_fingerprints} / {m.total_a}",
         )
 
-    console.print("\n")
-    console.print(table)
+@app.command("pr-fix")
+def cmd_pr_fix(
+    exercise: str = typer.Argument(..., help="Nombre de la actividad."),
+    student: str = typer.Argument(..., help="Nombre de usuario del estudiante."),
+    org: str = typer.Option("INGCOM-UNRN-P1", "--org", "-o", help="Organización de GitHub."),
+    branch: str = typer.Option("correccion", "--branch", "-b", help="Nombre de la rama de corrección."),
+) -> None:
+    """Reconstruye o crea el Pull Request de corrección para un estudiante (reemplaza prfix.sh)."""
+    from dredd.core.github_api import create_or_repair_pr
+
+    workspace_dir = Path.cwd()
+    try:
+        repo_path = ensure_submission_repo(org, exercise, student, workspace_dir)
+        console.print(f"Reconstruyendo PR de corrección para [cyan]{student}[/cyan]...")
+        ok = create_or_repair_pr(org, student, repo_path, branch_name=branch)
+        if ok:
+            console.print("[bold green]✓ Pull Request preparado o verificado con éxito en GitHub.[/bold green]")
+        else:
+            console.print("[bold yellow]⚠ El PR no pudo crearse automáticamente.[/bold yellow]")
+    except Exception as e:
+        console.print(f"[bold red]Error en pr-fix:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
 
 
 @moodle_app.command("ingest")

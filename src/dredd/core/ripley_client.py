@@ -32,8 +32,43 @@ def run_ripley_analysis(target_path: Path) -> Dict[str, Any]:
         except Exception:
             pass
 
-    # 3. Fallback de emergencia: compilación básica con GCC
-    c_files = sorted(target_path.glob("**/*.c"))
+    # 3. Fallback nativo: compilación con GCC + análisis AST nativo de Dredd
+    from dredd.core.ast_checker import audit_c_file
+    from dredd.core.makefile_eval import evaluate_makefile_exercises
+
+    c_files = sorted([
+        f for f in target_path.glob("**/*.c")
+        if not any(part.startswith(".") for part in f.parts)
+    ])
+
+    ast_findings = []
+    for c_file in c_files:
+        ast_findings.extend(audit_c_file(c_file))
+
+    # Soporte para proyectos modulares de ejercicios (conan mode)
+    makefile_results = evaluate_makefile_exercises(target_path)
+    if makefile_results:
+        all_passed = all(m.clean_ok and m.test_ok for m in makefile_results)
+        return {
+            "version": "2.0.0",
+            "compilation": {
+                "success": all_passed,
+                "raw_stderr": "\n".join(m.output_log for m in makefile_results),
+                "translated_diagnostics": [],
+            },
+            "ast_findings": ast_findings,
+            "tests": {
+                "total": len(makefile_results),
+                "passed": sum(1 for m in makefile_results if m.test_ok),
+                "failed": sum(1 for m in makefile_results if not m.test_ok),
+                "cases": [
+                    {"name": m.exercise_name, "passed": m.test_ok, "memory_leak": False, "sanitizer_error": m.output_log if not m.test_ok else ""}
+                    for m in makefile_results
+                ],
+            },
+            "metrics": {"c_files_count": len(c_files)},
+        }
+
     if not c_files:
         return {
             "version": "2.0.0",
@@ -54,7 +89,7 @@ def run_ripley_analysis(target_path: Path) -> Dict[str, Any]:
                 "raw_stderr": proc.stderr,
                 "translated_diagnostics": [],
             },
-            "ast_findings": [],
+            "ast_findings": ast_findings,
             "tests": {"total": 0, "passed": 0, "failed": 0, "cases": []},
             "metrics": {"c_files_count": len(c_files)},
         }
@@ -62,7 +97,8 @@ def run_ripley_analysis(target_path: Path) -> Dict[str, Any]:
     return {
         "version": "2.0.0",
         "compilation": {"success": False, "raw_stderr": "Ni Ripley ni GCC se encuentran disponibles."},
-        "ast_findings": [],
+        "ast_findings": ast_findings,
         "tests": {"total": 0, "passed": 0, "failed": 0, "cases": []},
         "metrics": {},
     }
+

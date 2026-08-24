@@ -81,3 +81,46 @@ def open_pr_in_browser(org: str, student: str, pr_number: Optional[int] = None) 
     opener = shutil.which("xdg-open") or shutil.which("firefox") or shutil.which("google-chrome")
     if opener:
         subprocess.Popen([opener, pr_files_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def create_or_repair_pr(
+    org: str,
+    student: str,
+    repo_path: Path,
+    branch_name: str = "correccion",
+    base_branch: str = "main",
+    title: str = "Corrección",
+    body: str = "Pull Request de corrección automática generado por Dredd.",
+) -> bool:
+    """Crea o repara una rama y Pull Request de corrección para un estudiante (reemplaza prfix.sh)."""
+    if not is_gh_installed():
+        raise RuntimeError("GitHub CLI ('gh') no está instalado o autenticado.")
+
+    # 1. Asegurar rama local
+    subprocess.run(["git", "-C", str(repo_path), "checkout", "-B", branch_name], capture_output=True)
+    subprocess.run(["git", "-C", str(repo_path), "push", "-f", "--set-upstream", "origin", branch_name], capture_output=True)
+
+    # 2. Crear PR mediante gh
+    repo_full_name = f"{org}/{student}"
+    proc = subprocess.run(
+        [
+            "gh",
+            "pr",
+            "create",
+            "--repo",
+            repo_full_name,
+            "--base",
+            base_branch,
+            "--head",
+            branch_name,
+            "--title",
+            title,
+            "--body",
+            body,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    return proc.returncode == 0 or "already exists" in (proc.stderr or "").lower()
+
