@@ -214,25 +214,67 @@ def cmd_moodle_ingest(
     console.print(f"  · Nuevas revisiones creadas: {new_revs}\n")
 
 
+@app.command("export")
+def cmd_export(
+    activity: str = typer.Argument(..., help="Nombre / slug de la actividad a exportar."),
+    csv_out: Optional[Path] = typer.Option(None, "--csv", "-c", help="Ruta del CSV de calificaciones Moodle."),
+    zip_out: Optional[Path] = typer.Option(None, "--zip", "-z", help="Ruta del ZIP de retroalimentación Moodle."),
+    dash_out: Optional[Path] = typer.Option(None, "--dashboard", "-d", help="Ruta del dashboard Markdown."),
+) -> None:
+    """Exporta calificaciones CSV, paquete ZIP de retroalimentación y dashboard consolidado de cohorte."""
+    from dredd.core.exporter import MoodleExporter
+
+    exporter = MoodleExporter(workspace_dir=Path.cwd())
+    try:
+        csv_file = exporter.export_grades_csv(activity, output_file=csv_out)
+        zip_file = exporter.export_feedback_zip(activity, output_file=zip_out)
+        dash_file = exporter.generate_dashboard(activity, output_file=dash_out)
+
+        console.print(f"\n[bold green]✓ Exportación completada para '{activity}':[/bold green]")
+        console.print(f"  · Libro de calificaciones: [cyan]{csv_file}[/cyan]")
+        console.print(f"  · Paquete ZIP de retroalimentación: [cyan]{zip_file}[/cyan]")
+        console.print(f"  · Dashboard de cohorte: [cyan]{dash_file}[/cyan]\n")
+    except Exception as e:
+        console.print(f"[bold red]Error durante la exportación:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command("export-report")
+def cmd_export_report(
+    source: Path = typer.Argument(..., help="Ruta al archivo Markdown (.md) del informe."),
+    fmt: str = typer.Option("html", "--format", "-f", help="Formato de exportación: 'html' o 'pdf'."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Ruta del archivo de salida."),
+    title: str = typer.Option("Informe de Evaluación — Dredd", "--title", "-t", help="Título del informe."),
+) -> None:
+    """Convierte un informe Markdown a HTML autocontenido enriquecido o PDF (zero-dependencies)."""
+    from dredd.core.report_export import export_report
+
+    try:
+        out_file = export_report(source, fmt=fmt, out_path=output, title=title)
+        console.print(f"[bold green]✓ Informe exportado con éxito ({fmt.upper()}):[/bold green] [cyan]{out_file}[/cyan]")
+    except Exception as e:
+        console.print(f"[bold red]Error al exportar informe:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+
 @moodle_app.command("export")
 def cmd_moodle_export(
     exercise: str = typer.Option(..., "--exercise", "-e", help="Nombre del ejercicio o TP."),
     output: Path = typer.Option(Path("calificaciones.csv"), "--output", "-o", help="Archivo CSV de salida."),
 ) -> None:
     """Exporta las calificaciones a un archivo CSV compatible con Moodle."""
-    submissions_dir = Path.cwd() / f"{exercise}-submissions"
-    if not submissions_dir.is_dir():
-        # Fallback a directorio de actividad directo
-        submissions_dir = Path.cwd() / exercise
+    from dredd.core.exporter import MoodleExporter
 
-    if not submissions_dir.is_dir():
-        console.print(f"[bold red]Directorio inexistente: {submissions_dir}[/bold red]")
+    exporter = MoodleExporter(workspace_dir=Path.cwd())
+    try:
+        csv_file = exporter.export_grades_csv(exercise, output_file=output)
+        console.print(f"\n[bold green]✓ Planilla generada en: {csv_file}[/bold green]\n")
+    except Exception as e:
+        console.print(f"[bold red]Error al exportar planilla Moodle:[/bold red] {e}")
         raise typer.Exit(code=1)
-
-    export_grades_csv(exercise, submissions_dir, output, grades_map={})
-    console.print(f"\n[bold green]✓ Planilla generada en: {output}[/bold green]\n")
 
 
 if __name__ == "__main__":
     app()
+
 

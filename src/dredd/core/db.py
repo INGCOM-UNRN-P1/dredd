@@ -214,3 +214,93 @@ class DatabaseManager:
 
             conn.commit()
             return rev_id
+
+    def save_evaluation(
+        self,
+        revision_id: int,
+        compilation_status: str,
+        preliminary_grade: float,
+        grade_compilation: float,
+        grade_style: float,
+        grade_linter: float,
+        grade_tests: float,
+        unified_diff: str = "",
+        compilation_logs: str = "",
+        test_results: Optional[List[Dict[str, Any]]] = None,
+    ) -> int:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO evaluations (
+                    revision_id, compilation_status, preliminary_grade,
+                    grade_compilation, grade_style, grade_linter, grade_tests,
+                    unified_diff, compilation_logs
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(revision_id) DO UPDATE SET
+                    evaluated_at=CURRENT_TIMESTAMP,
+                    compilation_status=excluded.compilation_status,
+                    preliminary_grade=excluded.preliminary_grade,
+                    grade_compilation=excluded.grade_compilation,
+                    grade_style=excluded.grade_style,
+                    grade_linter=excluded.grade_linter,
+                    grade_tests=excluded.grade_tests,
+                    unified_diff=excluded.unified_diff,
+                    compilation_logs=excluded.compilation_logs
+            """,
+                (
+                    revision_id,
+                    compilation_status,
+                    preliminary_grade,
+                    grade_compilation,
+                    grade_style,
+                    grade_linter,
+                    grade_tests,
+                    unified_diff,
+                    compilation_logs,
+                ),
+            )
+            eval_id = cursor.lastrowid
+            if eval_id is None:
+                cursor.execute(
+                    "SELECT id FROM evaluations WHERE revision_id = ?", (revision_id,)
+                )
+                row = cursor.fetchone()
+                eval_id = row["id"]
+
+            cursor.execute("DELETE FROM test_results WHERE evaluation_id = ?", (eval_id,))
+            if test_results:
+                for tr in test_results:
+                    cursor.execute(
+                        """
+                        INSERT INTO test_results (evaluation_id, exercise, test_case, cli_args, result, exec_time_ms)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                        (
+                            eval_id,
+                            tr.get("exercise", ""),
+                            tr.get("test_case", ""),
+                            tr.get("cli_args", ""),
+                            tr.get("result", ""),
+                            tr.get("exec_time_ms", 0.0),
+                        ),
+                    )
+
+            conn.commit()
+            return eval_id
+
+    def get_student_evaluation(self, revision_id: int) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM evaluations WHERE revision_id = ?", (revision_id,))
+            eval_row = cursor.fetchone()
+            if not eval_row:
+                return None
+            res = dict(eval_row)
+            cursor.execute(
+                "SELECT * FROM test_results WHERE evaluation_id = ?", (eval_row["id"],)
+            )
+            res["test_results"] = [dict(r) for r in cursor.fetchall()]
+            return res
+
