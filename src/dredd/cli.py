@@ -278,3 +278,53 @@ if __name__ == "__main__":
     app()
 
 
+@app.command("fuzz-gen")
+def fuzz_gen(
+    modelo: Path = typer.Argument(..., exists=True, dir_okay=False,
+                                  help="Solución modelo de la cátedra (.c)."),
+    salida: Path = typer.Option(Path("casos"), "--salida", "-o",
+                                help="Directorio destino de los pares caso_NN.in/.out."),
+    spec: Optional[Path] = typer.Option(None, "--spec", help="spec.yaml opcional (tipo_entrada, semillas_extra, tamano_max)."),
+    cantidad: int = typer.Option(12, "--cantidad", "-n", help="Máximo de testcases a generar."),
+    segundos: int = typer.Option(15, "--segundos", help="Tiempo de fuzzing si hay clang/libFuzzer."),
+    sin_libfuzzer: bool = typer.Option(False, "--sin-libfuzzer", help="Fuerza el modo determinista."),
+):
+    """fuzz-gen: endurece el banco generando casos límite contra la solución modelo.
+
+    Combina semillas extremas deterministas (INT_MAX/INT_MIN, cadenas vacías,
+    tamaños 0..N) con mutaciones y —si clang+libFuzzer están disponibles—
+    fuzzing guiado por cobertura. Cada candidato se ejecuta contra el modelo
+    para fijar la salida esperada; duplicados y crashes se reportan aparte.
+    """
+    from dredd.core.fuzz_gen import generar_testcases
+
+    espec = None
+    if spec:
+        import yaml
+        with open(spec, "r", encoding="utf-8") as f:
+            espec = yaml.safe_load(f)
+
+    console.print(f"[bold]fuzz-gen[/bold] sobre {modelo.name} → {salida}")
+    try:
+        resultado = generar_testcases(modelo, salida, spec=espec,
+                                      cantidad_maxima=cantidad,
+                                      usar_libfuzzer=not sin_libfuzzer,
+                                      segundos_fuzz=segundos)
+    except RuntimeError as e:
+        console.print(f"[bold red]✗ {e}[/bold red]")
+        raise typer.Exit(code=1)
+
+    tabla = Table(title=f"Testcases generados (modo: {resultado.modo})")
+    tabla.add_column("Entrada", style="cyan")
+    tabla.add_column("Salida esperada", style="green")
+    for in_p, out_p in resultado.generados:
+        tabla.add_row(in_p.name, out_p.name)
+    console.print(tabla)
+    console.print(
+        f"\n[green]✓ {len(resultado.generados)} casos generados[/green] · "
+        f"{resultado.descartados_duplicados} duplicados descartados"
+    )
+    if resultado.crashes:
+        console.print(f"[yellow]⚠ {len(resultado.crashes)} candidatos problemáticos:[/yellow]")
+        for c in resultado.crashes[:5]:
+            console.print(f"   · {c}")
