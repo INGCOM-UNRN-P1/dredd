@@ -333,3 +333,24 @@ def fuzz_gen(
         console.print(f"[yellow]⚠ {len(resultado.crashes)} candidatos problemáticos:[/yellow]")
         for c in resultado.crashes[:5]:
             console.print(f"   · {c}")
+
+
+@app.command("oral-guide")
+def oral_guide(
+    repo: Path = typer.Argument(..., exists=True, file_okay=False,
+                                help="Repositorio del alumno (clonado en el workspace)."),
+    alumno: Optional[str] = typer.Option(None, "--alumno", help="Nombre legible del alumno."),
+    ejercicio: Optional[str] = typer.Option(None, "--ejercicio", help="TP/parcial asociado."),
+    salida: Optional[Path] = typer.Option(None, "-o", "--salida", help="Archivo .md destino (por defecto, stdout)."),
+    sin_ripley: bool = typer.Option(False, "--sin-ripley", help="No correr análisis técnico."),
+) -> None:
+    """oral-exam-companion: genera una guía de preguntas para coloquio/defensa."""
+    from dredd.core.oral_guide import generar_guia
+
+    guia = generar_guia(repo, nombre_alumno=alumno, ejercicio=ejercicio,
+                        correr_ripley=not sin_ripley)
+    if salida:
+        salida.write_text(guia, encoding="utf-8")
+        console.print(f"[green]✓ Guía oral generada[/green] → {salida}")
+    else:
+        console.print(guia)
