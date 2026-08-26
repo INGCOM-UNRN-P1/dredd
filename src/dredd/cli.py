@@ -354,3 +354,62 @@ def oral_guide(
         console.print(f"[green]✓ Guía oral generada[/green] → {salida}")
     else:
         console.print(guia)
+
+
+@app.command("multiplex")
+def cmd_multiplex(
+    spec: Path = typer.Option(..., "--spec", "-s", exists=True, help="Ruta al archivo matriz.yaml."),
+    students: Optional[Path] = typer.Option(None, "--students", exists=True, help="CSV con lista de alumnos."),
+    salida: Path = typer.Option(Path("dist/multiplex"), "--salida", "-o", help="Directorio destino de la multiplexación."),
+    pack: bool = typer.Option(True, "--pack/--no-pack", help="Generar paquetes .ripkg para cada variante."),
+    starters: bool = typer.Option(True, "--starters/--no-starters", help="Generar starter repos por alumno."),
+) -> None:
+    """tp-multiplexer: Genera variantes combinatorias y asignación determinista por alumno."""
+    import shutil
+    import subprocess
+    import sys
+
+    # 1. Intentar ejecución vía CLI de deckard
+    deckard_bin = shutil.which("deckard")
+    if not deckard_bin:
+        cand = Path(__file__).resolve().parent.parent.parent.parent / "deckard" / ".venv" / "bin" / "deckard"
+        if cand.is_file():
+            deckard_bin = str(cand)
+
+    if deckard_bin:
+        args = [deckard_bin, "multiplex", "--spec", str(spec), "-o", str(salida)]
+        if students:
+            args.extend(["--students", str(students)])
+        if not pack:
+            args.append("--no-pack")
+        if not starters:
+            args.append("--no-starters")
+        proc = subprocess.run(args, capture_output=True, text=True)
+        if proc.stdout:
+            console.print(proc.stdout.rstrip())
+        if proc.stderr:
+            console.print(proc.stderr.rstrip())
+        raise typer.Exit(code=proc.returncode)
+
+    # 2. Fallback por import directo
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent / "deckard" / "src"))
+        from deckard.core.multiplex import multiplexar_tp
+
+        resultado = multiplexar_tp(
+            matriz_path=spec,
+            students_path=students,
+            output_dir=salida,
+            pack_ripkg=pack,
+            generar_starters=starters,
+        )
+        console.print(f"[bold green]✓ Multiplexación completada para '{resultado.ejercicio}'[/bold green]")
+        console.print(f"  • Total de variantes combinatorias: [cyan]{resultado.total_variantes}[/cyan]")
+        console.print(f"  • Directorio de salida: [dim]{resultado.output_dir}[/dim]")
+        if resultado.asignaciones:
+            console.print(f"  • Estudiantes asignados: [green]{len(resultado.asignaciones)}[/green]")
+    except Exception as e:
+        console.print(f"[bold red]Error en multiplex:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+
