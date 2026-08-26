@@ -124,6 +124,8 @@ def cmd_comment(
 def cmd_plagiarism(
     exercise: str = typer.Argument(..., help="Nombre de la actividad a auditar."),
     threshold: float = typer.Option(0.60, "--threshold", "-th", help="Umbral de similitud mínima (0.0 a 1.0)."),
+    strip_template: Optional[Path] = typer.Option(None, "--strip-template",
+        help="boiler-strip: plantilla/archivo(s) de cátedra a eliminar antes de calcular similitud."),
 ) -> None:
     """Calcula la matriz de similitud Winnowing entre todas las entregas descargadas."""
     submissions_dir = Path.cwd() / f"{exercise}-submissions"
@@ -131,7 +133,10 @@ def cmd_plagiarism(
         console.print(f"[bold red]Directorio inexistente: {submissions_dir}[/bold red]")
         raise typer.Exit(code=1)
 
-    detector = PlagiarismDetector(threshold=threshold)
+    if strip_template:
+        console.print(f"[dim]boiler-strip activo contra: {strip_template}[/dim]")
+
+    detector = PlagiarismDetector(threshold=threshold, plantilla=strip_template)
     matches = detector.analyze_submissions(submissions_dir)
 
     if not matches:

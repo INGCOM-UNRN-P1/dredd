@@ -82,24 +82,44 @@ class SimilarityMatch:
 class PlagiarismDetector:
     """Analiza la cohorte de entregas descargadas en <ejercicio>-submissions/."""
 
-    def __init__(self, k: int = 8, w: int = 4, threshold: float = 0.60):
+    def __init__(self, k: int = 8, w: int = 4, threshold: float = 0.60,
+                 plantilla: Optional[Path] = None):
         self.k = k
         self.w = w
         self.threshold = threshold
+        # boiler-strip (nuevas.md): si hay plantilla de cátedra, se sanitizan
+        # las entregas antes de calcular huellas.
+        self._stripper = None
+        if plantilla is not None:
+            from dredd.core.boiler_strip import BoilerStripper
+            stripper = BoilerStripper(ventanas_minimas=2)
+            stripper.cargar_plantilla(plantilla)
+            self._stripper = stripper
+
+    def _codigo_sanitizado(self, student_dir: Path) -> str:
+        trozos: List[str] = []
+        for c_file in sorted(student_dir.glob("**/*.c")):
+            code = c_file.read_text(encoding="utf-8", errors="replace")
+            if self._stripper is not None:
+                trozos.append(self._stripper.limpiar(code))
+            else:
+                trozos.append(code)
+        return "\n\n".join(trozos)
 
     def extract_fingerprints_from_dir(self, student_dir: Path) -> Set[int]:
         fps: Set[int] = set()
-        c_files = sorted(student_dir.glob("**/*.c"))
-        for c_file in c_files:
-            try:
-                code = c_file.read_text(encoding="utf-8", errors="replace")
-                tokens = tokenize_c_code(code)
-                fps.update(compute_winnowing_fingerprints(tokens, k=self.k, w=self.w))
-            except Exception:
-                continue
+        try:
+            code = self._codigo_sanitizado(student_dir)
+            tokens = tokenize_c_code(code)
+            fps.update(compute_winnowing_fingerprints(tokens, k=self.k, w=self.w))
+        except Exception:
+            pass
         return fps
 
-    def analyze_submissions(self, submissions_dir: Path, threshold: Optional[float] = None) -> List[SimilarityMatch]:
+    def analyze_submissions(self, submissions_dir: Path, threshold: Optional[float] = None,
+                            plantilla: Optional[Path] = None) -> List[SimilarityMatch]:
+        if plantilla is not None and self._stripper is None:
+            self.__init__(k=self.k, w=self.w, threshold=self.threshold, plantilla=plantilla)
         thresh = threshold if threshold is not None else self.threshold
         if not submissions_dir.is_dir():
             return []
