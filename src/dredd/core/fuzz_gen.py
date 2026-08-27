@@ -142,13 +142,13 @@ def compilar_modelo(fuente: Path, salida: Path,
     clang = shutil.which("clang")
     if con_libfuzzer and clang:
         cmd = [clang, "-g", "-O1", "-fsanitize=fuzzer,address",
-               "-fno-omit-frame-pointer", "-o", str(salida), str(fuente)]
+               "-fno-omit-frame-pointer", "-o", str(salida), str(fuente), "-lm"]
         usa_fuzzer = True
     else:
         gcc = shutil.which("gcc")
         if gcc is None:
             return False, "gcc no disponible", False
-        cmd = [gcc, "-std=c11", "-O2", "-Wall", "-o", str(salida), str(fuente)]
+        cmd = [gcc, "-std=c11", "-O2", "-Wall", "-o", str(salida), str(fuente), "-lm"]
         usa_fuzzer = False
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
