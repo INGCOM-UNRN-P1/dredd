@@ -1,64 +1,83 @@
-"""Linter nativo de reglas de cátedra P1 y verificación estática en Python para Dredd."""
+"""Linter nativo de reglas de cátedra P1 y verificación estática usando Tree-Sitter AST en Dredd."""
+
+from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+import tree_sitter_c as tsc
+from tree_sitter import Language, Parser, Node
+
+_C_LANGUAGE: Optional[Language] = None
+_PARSER: Optional[Parser] = None
+
+
+def get_c_parser() -> Parser:
+    global _C_LANGUAGE, _PARSER
+    if _PARSER is None:
+        _C_LANGUAGE = Language(tsc.language())
+        _PARSER = Parser(_C_LANGUAGE)
+    return _PARSER
+
+
+def _find_identifier(node: Node) -> Optional[str]:
+    if node.type in ("identifier", "type_identifier", "field_identifier"):
+        return node.text.decode("utf-8", errors="replace")
+    for child in node.children:
+        res = _find_identifier(child)
+        if res:
+            return res
+    return None
+
 
 def check_regla_0x0001(content: str) -> List[Tuple[str, int]]:
-    """Regla 0x0001h: Extrae variables y argumentos para verificar nombres significativos."""
-    variables_found = []
-    lines = content.splitlines()
-    func_def_pattern = re.compile(r'\w[\w\s\*]+\s*\(([^)]*)\)\s*{')
-    var_decl_pattern = re.compile(r'^\s*(?:const|static|extern|unsigned|signed|struct\s+\w+|void|int|char|float|double|short|long)\s+([^;]+);')
-    for_loop_decl_pattern = re.compile(r'for\s*\(([^;]+);')
+    """Regla 0x0001h: Extrae variables y argumentos para verificar nombres significativos usando Tree-Sitter AST."""
+    variables_found: List[Tuple[str, int]] = []
+    source_bytes = content.encode("utf-8")
+    parser = get_c_parser()
+    tree = parser.parse(source_bytes)
 
-    for i, line in enumerate(lines):
-        line_num = i + 1
-        clean_line = line.split('//')[0].strip()
-        if not clean_line or clean_line.startswith('#'):
-            continue
+    def _traverse(node: Node) -> None:
+        if node.type == "parameter_declaration":
+            decl = node.child_by_field_name("declarator")
+            if decl:
+                ident = _find_identifier(decl)
+                if ident and ident.lower() != "void":
+                    line_num = node.start_point.row + 1
+                    variables_found.append((ident, line_num))
 
-        for_match = for_loop_decl_pattern.search(clean_line)
-        if for_match:
-            init_part = for_match.group(1).strip()
-            type_pattern = r'\b(const|static|extern|unsigned|signed|struct\s+\w+|void|int|char|float|double|short|long)\b'
-            if re.search(type_pattern, init_part):
-                var_name_part = init_part.split('=')[0].strip()
-                parts = var_name_part.split()
-                if parts:
-                    var_name = parts[-1].lstrip('*').split('[')[0]
-                    if var_name:
-                        variables_found.append((var_name, line_num))
+        elif node.type == "declaration":
+            # Verificar si es declaración de variable y no de función
+            decl = node.child_by_field_name("declarator")
+            if decl and decl.type != "function_declarator":
+                ident = _find_identifier(decl)
+                if ident:
+                    line_num = node.start_point.row + 1
+                    variables_found.append((ident, line_num))
+            elif not decl:
+                for child in node.children:
+                    if child.type in ("init_declarator", "pointer_declarator", "array_declarator"):
+                        ident = _find_identifier(child)
+                        if ident:
+                            line_num = node.start_point.row + 1
+                            variables_found.append((ident, line_num))
 
-        match = func_def_pattern.search(clean_line)
-        if match:
-            params_str = match.group(1).strip()
-            if params_str and params_str.lower() != 'void':
-                for param in params_str.split(','):
-                    parts = param.strip().split()
-                    if parts:
-                        var_name = parts[-1].lstrip('*').split('[')[0]
-                        if var_name:
-                            variables_found.append((var_name, line_num))
-        elif not ('(' in clean_line and ')' in clean_line and '{' not in clean_line):
-            match = var_decl_pattern.search(clean_line)
-            if match:
-                declarations_str = match.group(1)
-                if '(' in declarations_str and ')' in declarations_str:
-                    continue
-                for decl in declarations_str.split(','):
-                    if '=' in decl:
-                        decl = decl.split('=')[0]
-                    if '[' in decl:
-                        decl = decl.split('[')[0]
-                    parts = decl.strip().split()
-                    if parts:
-                        var_name = parts[-1].lstrip('*')
-                        if var_name:
-                            variables_found.append((var_name, line_num))
+        elif node.type == "for_statement":
+            init_node = node.child_by_field_name("initializer")
+            if init_node:
+                for child in init_node.children:
+                    if child.type in ("declaration", "init_declarator"):
+                        ident = _find_identifier(child)
+                        if ident:
+                            line_num = node.start_point.row + 1
+                            variables_found.append((ident, line_num))
 
+        for child in node.children:
+            _traverse(child)
+
+    _traverse(tree.root_node)
     return sorted(list(set(variables_found)), key=lambda x: x[1])
 
 
@@ -111,34 +130,35 @@ def check_regla_0x0005(line: str, line_num: int, lines: List[str]) -> List[Dict[
 
 
 def check_regla_0x000Bh(content: str) -> List[Dict[str, Any]]:
-    """Regla 0x000Bh: Prohibidas las variables globales mutables fuera de funciones."""
+    """Regla 0x000Bh: Prohibidas las variables globales mutables fuera de funciones usando Tree-Sitter AST."""
     findings = []
-    lines = content.splitlines()
-    brace_level = 0
-    var_pattern = re.compile(r'^\s*(?:static\s+)?(?:int|char|float|double|short|long|unsigned|struct\s+\w+)\s+([a-zA-Z_]\w*)\s*(?:=|;)')
+    source_bytes = content.encode("utf-8")
+    parser = get_c_parser()
+    tree = parser.parse(source_bytes)
 
-    for i, line in enumerate(lines):
-        clean = line.split('//')[0].strip()
-        if not clean or clean.startswith('#'):
-            continue
+    for node in tree.root_node.children:
+        if node.type == "declaration":
+            type_node = node.child_by_field_name("type")
+            type_text = type_node.text.decode("utf-8", errors="replace") if type_node else ""
+            raw_decl = node.text.decode("utf-8", errors="replace")
 
-        if brace_level == 0 and not clean.endswith(';'):
-            # Posible inicio de función o struct
-            pass
-        elif brace_level == 0 and clean.endswith(';'):
-            m = var_pattern.match(clean)
-            if m and not clean.startswith('typedef') and not clean.startswith('const'):
+            # Descartar funciones, typedefs y constantes
+            if "const " in raw_decl or raw_decl.startswith("typedef"):
+                continue
+
+            decl_node = node.child_by_field_name("declarator")
+            if decl_node and decl_node.type == "function_declarator":
+                continue
+
+            ident = _find_identifier(decl_node or node)
+            if ident:
                 findings.append({
                     "rule_id": "0x000Bh",
-                    "line": i + 1,
+                    "line": node.start_point.row + 1,
                     "severity": "ERROR",
-                    "message": f"Variable global no permitida: '{m.group(1)}'.",
+                    "message": f"Variable global no permitida: '{ident}'.",
                     "suggestion": "Pasar la variable por parámetro o declararla localmente.",
                 })
-
-        brace_level += clean.count('{') - clean.count('}')
-        if brace_level < 0:
-            brace_level = 0
 
     return findings
 
@@ -219,7 +239,7 @@ def check_regla_0xEEEE(content: str) -> List[Dict[str, Any]]:
 
 
 def audit_c_file(c_file: Path) -> List[Dict[str, Any]]:
-    """Ejecuta el análisis completo de reglas P1 sobre un archivo C."""
+    """Ejecuta el análisis completo de reglas P1 sobre un archivo C usando Tree-Sitter AST."""
     try:
         content = c_file.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
