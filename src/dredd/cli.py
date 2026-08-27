@@ -146,6 +146,7 @@ def cmd_plagiarism(
     threshold: float = typer.Option(0.60, "--threshold", "-th", help="Umbral de similitud mínima (0.0 a 1.0)."),
     strip_template: Optional[Path] = typer.Option(None, "--strip-template",
         help="boiler-strip: plantilla/archivo(s) de cátedra a eliminar antes de calcular similitud."),
+    html: Optional[Path] = typer.Option(None, "--html", help="Ruta del reporte HTML interactivo con matriz y diff lado a lado."),
 ) -> None:
     """Calcula la matriz de similitud Winnowing entre todas las entregas descargadas."""
     exercise_slug, submissions_dir = resolve_submissions_dir(Path.cwd(), exercise)
@@ -176,6 +177,13 @@ def cmd_plagiarism(
             f"{m.similarity_pct:.1f}%",
             f"{m.shared_fingerprints} / {m.total_a}",
         )
+    console.print(table)
+
+    if html:
+        from dredd.core.plagiarism import generate_plagiarism_html_report
+        generate_plagiarism_html_report(submissions_dir, matches, html)
+        console.print(f"\n[bold green]✓ Reporte HTML interactivo generado en:[/bold green] [cyan]{html}[/cyan]\n")
+
 
 @app.command("pr-fix")
 def cmd_pr_fix(

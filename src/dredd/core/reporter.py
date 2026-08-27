@@ -178,3 +178,65 @@ def generate_student_report(
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text(report_content, encoding="utf-8")
     return report_content
+
+
+def generate_personalized_feedback_markdown(
+    student_name: str,
+    exercise_name: str,
+    analysis: Dict[str, Any],
+    metadata: Optional[RepoMetadata] = None,
+    guide: Optional[Any] = None,
+    revision: Optional[str] = None,
+) -> str:
+    """Genera una devolución personalizada en Markdown lista para adjuntar en Moodle / GitHub Classroom PR."""
+    comp = analysis.get("compilation", {})
+    ast = analysis.get("ast_findings", [])
+    tests = analysis.get("tests", {})
+
+    passed = (
+        comp.get("success", False)
+        and (tests.get("failed", 0) == 0)
+        and not any(f.get("severity") in ("ERROR", "FATAL") for f in ast)
+    )
+
+    status_badge = "✅ **ENTREGA APROBADA**" if passed else "⚠️ **ENTREGA CON OBSERVACIONES / REQUIERE REVISIÓN**"
+    if not comp.get("success", False):
+        status_badge = "❌ **ENTREGA NO APROBADA (Error de compilación)**"
+
+    lines = [
+        f"## Devolución Pedagógica — {student_name}",
+        f"**Actividad:** `{exercise_name}`",
+        f"**Estado General:** {status_badge}",
+    ]
+
+    if revision:
+        lines.append(f"**Versión:** `{revision}`")
+
+    lines.append("\n### 📋 Resumen de Evaluación")
+    lines.append(f"- **Compilación ({comp.get('compiler_used', 'GCC').upper()}):** {'✓ Exitosa' if comp.get('success') else '✖ Falló'}")
+    lines.append(f"- **Reglas P1 / Calidad:** {len(ast)} observación(es) detectada(s)")
+    if tests.get("total", 0) > 0:
+        lines.append(f"- **Casos de prueba:** {tests.get('passed', 0)}/{tests.get('total', 0)} aprobados")
+
+    # Acciones concretas sugeridas
+    issues = []
+    if not comp.get("success"):
+        issues.append("Corregir los errores de compilación antes de volver a entregar.")
+    for d in comp.get("translated_diagnostics", []):
+        if d.get("suggestion"):
+            issues.append(d["suggestion"])
+    for f in ast:
+        if f.get("suggestion"):
+            issues.append(f"{f.get('rule_code', 'P1')}: {f['suggestion']}")
+    for tc in tests.get("cases", []):
+        if not tc.get("passed"):
+            issues.append(f"Revisar caso `{tc.get('name')}`: verificar lógica o manejo de límites.")
+
+    if issues:
+        lines.append("\n### 🔧 Pasos sugeridos para la próxima entrega:")
+        for idx, iss in enumerate(issues[:6], 1):
+            lines.append(f"{idx}. {iss}")
+
+    lines.append("\n---\n*Cátedra de Programación 1 · Evaluación automatizada con Dredd*")
+    return "\n".join(lines) + "\n"
+

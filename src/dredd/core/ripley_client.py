@@ -8,10 +8,11 @@ from typing import Any, Dict, List, Optional
 
 
 from dredd.core.compiler import compile_c_sources
+from dredd.core.sandbox import execute_sandboxed, audit_sandbox_evasion
 
 
 def evaluate_guide_testcases(target_path: Path, guide: Any) -> List[Dict[str, Any]]:
-    """Ejecuta los casos de test .in / .out de la guía de Deckard contra los binarios del estudiante."""
+    """Ejecuta los casos de test .in / .out de la guía de Deckard contra los binarios del estudiante en sandbox."""
     if not guide or not getattr(guide, "exercises", None):
         return []
 
@@ -53,43 +54,80 @@ def evaluate_guide_testcases(target_path: Path, guide: Any) -> List[Dict[str, An
                     })
                 continue
 
-            # Ejecutar casos de prueba
+            # Ejecutar casos de prueba en sandbox con límites estrictos de RAM (64MB)
             for tc in ex.test_cases:
-                try:
-                    p_run = subprocess.run(
-                        [str(bin_file)],
-                        input=tc.get("entrada", ""),
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                    )
-                    expected = tc.get("salida", "").strip()
-                    actual = p_run.stdout.strip()
-                    passed = (p_run.returncode == 0) and (actual == expected or not expected)
-                    err_msg = p_run.stderr.strip() if p_run.returncode != 0 else (
-                        f"Salida esperada:\n{expected}\nObtenida:\n{actual}" if not passed else ""
-                    )
-                    results.append({
-                        "name": f"{ex.id} / {tc['nombre']}",
-                        "passed": passed,
-                        "memory_leak": False,
-                        "sanitizer_error": err_msg,
-                    })
-                except subprocess.TimeoutExpired:
-                    results.append({
-                        "name": f"{ex.id} / {tc['nombre']}",
-                        "passed": False,
-                        "memory_leak": False,
-                        "sanitizer_error": "Timeout (tiempo de ejecución excedido)",
-                        "timed_out": True,
-                    })
-                except Exception as e:
-                    results.append({
-                        "name": f"{ex.id} / {tc['nombre']}",
-                        "passed": False,
-                        "memory_leak": False,
-                        "sanitizer_error": str(e),
-                    })
+                retcode, stdout, stderr, timed_out = execute_sandboxed(
+                    cmd=[str(bin_file)],
+                    input_data=tc.get("entrada", ""),
+                    timeout=5.0,
+                    max_memory_mb=64,
+                    workspace=target_path,
+                )
+                expected = tc.get("salida", "").strip()
+                actual = stdout.strip()
+                passed = (retcode == 0) and (actual == expected or not expected) and not timed_out
+                err_msg = stderr.strip() if retcode != 0 else (
+                    f"Salida esperada:\n{expected}\nObtenida:\n{actual}" if not passed else ""
+                )
+                results.append({
+                    "name": f"{ex.id} / {tc['nombre']}",
+                    "passed": passed,
+                    "memory_leak": False,
+                    "sanitizer_error": err_msg,
+                    "timed_out": timed_out,
+                })
+
+    return results
+
+
+def discover_and_run_local_testcases(target_path: Path) -> List[Dict[str, Any]]:
+    """Descubre y ejecuta casos de prueba locales (.in / .out) dentro de la carpeta del estudiante."""
+    in_files = sorted(target_path.glob("**/*.in"))
+    if not in_files:
+        return []
+
+    c_files = sorted([
+        f for f in target_path.glob("**/*.c")
+        if not any(part.startswith(".") for part in f.parts)
+    ])
+    if not c_files:
+        return []
+
+    import tempfile
+    results = []
+
+    with tempfile.TemporaryDirectory() as tmp_d:
+        tmp_dir = Path(tmp_d)
+        bin_file = tmp_dir / "local_test_bin"
+        comp_res = compile_c_sources(c_files, output_bin=bin_file)
+        if not comp_res.success:
+            return [{
+                "name": "compilacion_tests_locales",
+                "passed": False,
+                "sanitizer_error": comp_res.raw_stderr[:300],
+            }]
+
+        for in_f in in_files:
+            out_f = in_f.with_suffix(".out")
+            expected = out_f.read_text(encoding="utf-8", errors="replace").strip() if out_f.is_file() else ""
+            in_data = in_f.read_text(encoding="utf-8", errors="replace")
+
+            retcode, stdout, stderr, timed_out = execute_sandboxed(
+                cmd=[str(bin_file)],
+                input_data=in_data,
+                timeout=5.0,
+                max_memory_mb=64,
+                workspace=target_path,
+            )
+            actual = stdout.strip()
+            passed = (retcode == 0) and (actual == expected or not expected) and not timed_out
+            results.append({
+                "name": f"local / {in_f.name}",
+                "passed": passed,
+                "memory_leak": False,
+                "sanitizer_error": stderr.strip() if not passed else "",
+                "timed_out": timed_out,
+            })
 
     return results
 
@@ -182,18 +220,51 @@ def run_ripley_analysis(target_path: Path, guide: Optional[Any] = None) -> Dict[
                 "metrics": {"c_files_count": len(c_files)},
             }
 
-    # 4. Si la guía de Deckard provee casos de prueba, integrarlos a los resultados
+    # 4. Auditoría de seguridad y evasión de sandbox en todos los archivos C
+    c_files = sorted([
+        f for f in target_path.glob("**/*.c")
+        if not any(part.startswith(".") for part in f.parts)
+    ])
+    sec_findings = []
+    for c_f in c_files:
+        try:
+            code_txt = c_f.read_text(encoding="utf-8", errors="replace")
+            for sf in audit_sandbox_evasion(code_txt, c_f.name):
+                sec_findings.append({
+                    "rule_code": sf.rule_code,
+                    "rule_name": f"[SEGURIDAD] {sf.title}",
+                    "severity": sf.severity,
+                    "message": sf.message,
+                    "suggestion": "Eliminá llamadas a funciones del sistema o intentos de evasión de sandbox.",
+                    "file": c_f.name,
+                    "line": sf.line,
+                    "code_snippet": sf.code_snippet,
+                })
+        except Exception:
+            pass
+
+    if sec_findings:
+        res_dict.setdefault("ast_findings", []).extend(sec_findings)
+        res_dict.setdefault("metrics", {})["security_violations"] = len(sec_findings)
+
+    # 5. Ejecutar casos de prueba (de la guía Deckard o descubiertos localmente)
+    all_tests = list(res_dict.get("tests", {}).get("cases", []))
     if guide and getattr(guide, "exercises", None):
         guide_tests = evaluate_guide_testcases(target_path, guide)
         if guide_tests:
-            existing_tests = res_dict.get("tests", {}).get("cases", [])
-            all_cases = existing_tests + guide_tests
-            res_dict["tests"] = {
-                "total": len(all_cases),
-                "passed": sum(1 for c in all_cases if c.get("passed")),
-                "failed": sum(1 for c in all_cases if not c.get("passed")),
-                "cases": all_cases,
-            }
+            all_tests.extend(guide_tests)
+    else:
+        local_tests = discover_and_run_local_testcases(target_path)
+        if local_tests:
+            all_tests.extend(local_tests)
+
+    if all_tests:
+        res_dict["tests"] = {
+            "total": len(all_tests),
+            "passed": sum(1 for c in all_tests if c.get("passed")),
+            "failed": sum(1 for c in all_tests if not c.get("passed")),
+            "cases": all_tests,
+        }
 
     return res_dict
 
