@@ -124,7 +124,10 @@ class PlagiarismDetector:
         if not submissions_dir.is_dir():
             return []
 
-        student_dirs = [d for d in sorted(submissions_dir.iterdir()) if d.is_dir() and not d.name.startswith(".")]
+        student_dirs = [
+            d for d in sorted(submissions_dir.iterdir())
+            if d.is_dir() and not d.name.startswith(".") and d.name not in ("guia", "guide", "templates", "informe")
+        ]
         student_fps: Dict[str, Set[int]] = {}
 
         for s_dir in student_dirs:

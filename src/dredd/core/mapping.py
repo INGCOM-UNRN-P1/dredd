@@ -11,6 +11,8 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
 
+from dredd.core.guide_integration import ActivityGuide, load_activity_guide
+
 SPECIAL_AUXILIARY = "[AUXILIAR]"
 SPECIAL_IGNORE = "[IGNORAR]"
 
@@ -32,19 +34,52 @@ class ActivityMappingConfig:
     student_mappings: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
 
-def heuristic_match(filename: str, available_exercises: List[str]) -> Optional[str]:
-    """Infiere el ejercicio correspondiente a partir del nombre del archivo C."""
+def heuristic_match(
+    filename: str,
+    available_exercises: List[str],
+    file_content: Optional[str] = None,
+    guide: Optional[ActivityGuide] = None,
+) -> Optional[str]:
+    """Infiere el ejercicio correspondiente a partir del nombre del archivo C, su contenido y la guía de Deckard."""
     if not available_exercises:
         return None
 
     stem = Path(filename).stem.lower().strip()
 
-    # 1. Coincidencia exacta
+    # 1. Coincidencia exacta de ID
     for ex in available_exercises:
-        if stem == ex.lower():
+        ex_clean = ex.lower()
+        if stem == ex_clean or stem.replace("-", "_") == ex_clean.replace("-", "_"):
             return ex
 
-    # 2. Extracción de dígitos
+    # 2. Si tenemos la guía de Deckard vinculada, cotejar funciones, títulos y orden
+    if guide:
+        # Cotejo por funciones declaradas / definidas en el archivo C
+        if file_content:
+            for ex_obj in guide.exercises:
+                if ex_obj.id in available_exercises:
+                    for fn in ex_obj.functions:
+                        if fn and re.search(r"\b" + re.escape(fn) + r"\b", file_content):
+                            return ex_obj.id
+
+        # Cotejo por palabras clave en título del ejercicio
+        for ex_obj in guide.exercises:
+            if ex_obj.id in available_exercises and ex_obj.titulo:
+                palabras = [w.lower() for w in re.findall(r"\w+", ex_obj.titulo) if len(w) >= 4]
+                for p in palabras:
+                    if p in stem or stem in p or (len(p) >= 4 and len(stem) >= 4 and p[:4] == stem[:4]):
+                        return ex_obj.id
+
+        # Cotejo posicional: ej1 / ejercicio1 -> 1er ejercicio de la guía
+        file_digits = re.findall(r"\d+", stem)
+        if file_digits:
+            num = int(file_digits[-1])
+            if 1 <= num <= len(guide.exercises):
+                cand_id = guide.exercises[num - 1].id
+                if cand_id in available_exercises:
+                    return cand_id
+
+    # 3. Extracción de dígitos respecto a ejercicios disponibles
     file_digits = re.findall(r"\d+", stem)
     if file_digits:
         target_num = file_digits[-1]
@@ -54,15 +89,17 @@ def heuristic_match(filename: str, available_exercises: List[str]) -> Optional[s
         if len(matching_exercises) == 1:
             return matching_exercises[0]
 
-    # 3. Coincidencia de subcadena única
+    # 4. Coincidencia de subcadena única
+    clean_stem = stem.replace("-", "").replace("_", "")
     substring_matches = [
-        ex for ex in available_exercises if ex.lower() in stem or stem in ex.lower()
+        ex for ex in available_exercises
+        if ex.lower().replace("-", "").replace("_", "") in clean_stem or clean_stem in ex.lower().replace("-", "").replace("_", "")
     ]
     if len(substring_matches) == 1:
         return substring_matches[0]
 
-    # Si hay un solo ejercicio disponible y es main.c o tp.c
-    if len(available_exercises) == 1 and stem in ("main", "tp", "tarea", "entrega", "programa"):
+    # 5. Si hay un solo ejercicio disponible y el archivo es genérico
+    if len(available_exercises) == 1 and stem in ("main", "tp", "tarea", "entrega", "programa", "codigo", "solution"):
         return available_exercises[0]
 
     return None
@@ -71,10 +108,15 @@ def heuristic_match(filename: str, available_exercises: List[str]) -> Optional[s
 class MappingStore:
     """Administra la persistencia de los mapeos de archivos en mappings.json."""
 
-    def __init__(self, workspace_dir: str | Path, activity_slug: str) -> None:
+    def __init__(
+        self,
+        workspace_dir: str | Path,
+        activity_slug: str,
+        mapping_file: Optional[Path] = None,
+    ) -> None:
         self.workspace_dir = Path(workspace_dir)
         self.activity_slug = activity_slug
-        self.mapping_file = self.workspace_dir / activity_slug / "mappings.json"
+        self.mapping_file = mapping_file or (self.workspace_dir / activity_slug / "mappings.json")
         self.config = self.load()
 
     def load(self) -> ActivityMappingConfig:
@@ -105,6 +147,8 @@ class MappingStore:
         student_slug: str,
         filename: str,
         available_exercises: List[str],
+        file_content: Optional[str] = None,
+        guide: Optional[ActivityGuide] = None,
     ) -> Optional[str]:
         if student_slug in self.config.student_mappings:
             if filename in self.config.student_mappings[student_slug]:
@@ -113,7 +157,7 @@ class MappingStore:
         if filename in self.config.global_mappings:
             return self.config.global_mappings[filename]
 
-        return heuristic_match(filename, available_exercises)
+        return heuristic_match(filename, available_exercises, file_content=file_content, guide=guide)
 
     def set_student_mapping(self, student_slug: str, filename: str, target: str) -> None:
         if student_slug not in self.config.student_mappings:
@@ -132,24 +176,30 @@ class InteractiveMapper:
         workspace_dir: str | Path,
         activity_slug: str,
         console: Optional[Console] = None,
+        submissions_dir: Optional[Path] = None,
     ) -> None:
         self.workspace_dir = Path(workspace_dir)
         self.activity_slug = activity_slug
         self.console = console or Console()
-        self.store = MappingStore(workspace_dir, activity_slug)
+        self.submissions_dir = submissions_dir
+
+        target_dir = self.submissions_dir or (self.workspace_dir / self.activity_slug)
+        mapping_file = target_dir / "mappings.json"
+        self.store = MappingStore(self.workspace_dir, self.activity_slug, mapping_file=mapping_file)
+        self.guide = load_activity_guide(target_dir, self.activity_slug, self.workspace_dir)
 
     def collect_all_student_files(
         self,
         available_exercises: List[str],
     ) -> List[FileMappingEntry]:
-        activity_dir = self.workspace_dir / self.activity_slug
+        activity_dir = self.submissions_dir or (self.workspace_dir / self.activity_slug)
         if not activity_dir.exists():
             return []
 
         entries: List[FileMappingEntry] = []
 
         for s_dir in sorted(activity_dir.iterdir()):
-            if not s_dir.is_dir() or s_dir.name.startswith("."):
+            if not s_dir.is_dir() or s_dir.name.startswith(".") or s_dir.name in ("guia", "guide", "templates", "informe"):
                 continue
 
             rev_dirs = [d for d in s_dir.iterdir() if d.is_dir() and re.match(r"^r\d+$", d.name)]
@@ -161,10 +211,16 @@ class InteractiveMapper:
                 c_files = sorted(latest_rev.glob("*.c"))
 
             for c_file in c_files:
+                file_text = None
+                try:
+                    file_text = c_file.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    pass
+
                 effective = self.store.get_effective_mapping(
-                    s_dir.name, c_file.name, available_exercises
+                    s_dir.name, c_file.name, available_exercises, file_content=file_text, guide=self.guide
                 )
-                detected = heuristic_match(c_file.name, available_exercises)
+                detected = heuristic_match(c_file.name, available_exercises, file_content=file_text, guide=self.guide)
                 is_unmapped = effective is None
 
                 entries.append(
@@ -195,13 +251,13 @@ class InteractiveMapper:
         changes_count = 0
         if auto_apply:
             for entry in entries:
-                if entry.current_mapping is None and entry.detected_exercise:
+                if entry.detected_exercise and entry.filename not in self.store.config.global_mappings:
                     self.store.set_global_mapping(entry.filename, entry.detected_exercise)
                     entry.current_mapping = entry.detected_exercise
                     entry.is_ambiguous_or_unmapped = False
                     changes_count += 1
 
-        to_review = [e for e in entries if e.is_ambiguous_or_unmapped] if unmapped_only else entries
+        to_review = [e for e in entries if e.is_ambiguous_or_unmapped] if (unmapped_only or auto_apply) else entries
         if not to_review:
             self.console.print("[bold green]✓ Todos los archivos ya están correctamente vinculados.[/bold green]")
             if changes_count > 0:

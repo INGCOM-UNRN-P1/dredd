@@ -1,0 +1,15 @@
+
+Por favor, mantené las líneas de los archivos en hasta 80 (o 90) caracteres como maximo.
+
+Ejercicio 1.2
+
+Aunque el ejercicio habla de n y m, podes usar nombres mas descriptivos para las variables como 'inicio y fin'.
+
+Usa nombres mas descriptivos para las variables como 'inicio y fin' en lugar de numero1 y numero2
+
+Ejercicio 1.4
+
+numero_invertido ya es un número por su tipo int, podes usar directamente invertido.
+
+
+Mantené consistente la indentación.

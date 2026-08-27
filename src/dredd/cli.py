@@ -6,11 +6,12 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from dredd.core.git_ops import ensure_submission_repo, get_repo_metadata
+from dredd.core.git_ops import ensure_submission_repo, get_repo_metadata, resolve_submissions_dir
 from dredd.core.github_api import open_pr_in_browser, post_pr_comment
+from dredd.core.guide_integration import load_activity_guide
 from dredd.core.moodle import export_grades_csv, unpack_moodle_zip
 from dredd.core.plagiarism import PlagiarismDetector
-from dredd.core.reporter import generate_student_report
+from dredd.core.reporter import find_student_report, generate_student_report, resolve_submission_revision
 from dredd.core.ripley_client import run_ripley_analysis
 
 app = typer.Typer(
@@ -26,15 +27,16 @@ console = Console()
 
 @app.command("eval")
 def cmd_eval(
-    exercise: str = typer.Argument(..., help="Nombre de la actividad / ejercicio (ej. tp01, tp02)."),
+    exercise: str = typer.Argument(..., help="Nombre de la actividad / ejercicio o ruta al directorio de entregas (ej. tp01, ./entrega-3_1238305/)."),
     student: Optional[str] = typer.Argument(None, help="Nombre de usuario del estudiante (opcional si se usa --all)."),
     org: str = typer.Option("INGCOM-UNRN-P1", "--org", "-o", help="Organización de GitHub."),
     all_students: bool = typer.Option(False, "--all", "-a", help="Evaluar todos los estudiantes presentes en el workspace."),
     template_dir: Path = typer.Option(Path("informe"), "--template-dir", "-t", help="Directorio con header.md y footer.md."),
 ) -> None:
-    """Clona/actualiza el repositorio, ejecuta el análisis con Ripley y genera el informe Markdown."""
+    """Clona/actualiza el repositorio o evalúa entregas locales, ejecuta el análisis con Ripley y genera el informe Markdown."""
     workspace_dir = Path.cwd()
-    submissions_dir = workspace_dir / f"{exercise}-submissions"
+    exercise_slug, submissions_dir = resolve_submissions_dir(workspace_dir, exercise)
+    guide = load_activity_guide(submissions_dir, exercise_slug, workspace_dir)
 
     target_students = []
     if student:
@@ -43,12 +45,22 @@ def cmd_eval(
         if not submissions_dir.is_dir():
             console.print(f"[bold red]No existe el directorio de entregas: {submissions_dir}[/bold red]")
             raise typer.Exit(code=1)
-        target_students = [d.name for d in sorted(submissions_dir.iterdir()) if d.is_dir() and not d.name.startswith(".")]
+        target_students = [
+            d.name for d in sorted(submissions_dir.iterdir())
+            if d.is_dir() and not d.name.startswith(".") and d.name not in ("guia", "guide", "templates", "informe")
+        ]
     else:
         console.print("[bold red]Debe especificar un estudiante o usar --all.[/bold red]")
         raise typer.Exit(code=1)
 
-    table = Table(title=f"Evaluación Dredd — {exercise}")
+    if not target_students:
+        console.print(f"[yellow]No se encontraron carpetas de estudiantes dentro de: {submissions_dir}[/yellow]")
+        return
+
+    if guide and guide.exercises:
+        console.print(f"[bold green]✓ Guía Deckard conectada ('{guide.nombre}'): {len(guide.exercises)} ejercicio(s) ({', '.join(guide.get_exercise_ids())})[/bold green]")
+
+    table = Table(title=f"Evaluación Dredd — {exercise_slug}")
     table.add_column("Estudiante", style="cyan", justify="left")
     table.add_column("Compilación", justify="center")
     table.add_column("Tests", justify="center")
@@ -59,24 +71,27 @@ def cmd_eval(
         console.print(f"[bold]Procesando estudiante:[/bold] [cyan]{s_name}[/cyan]...")
 
         try:
-            repo_path = ensure_submission_repo(org, exercise, s_name, workspace_dir)
+            repo_path = ensure_submission_repo(org, exercise_slug, s_name, workspace_dir, submissions_dir=submissions_dir)
         except Exception as e:
             console.print(f"  [red]Error al obtener repositorio:[/red] {e}")
-            table.add_row(s_name, "[red]GIT ERROR[/red]", "—", "—", "No generado")
+            table.add_row(s_name, "[red]ERROR[/red]", "—", "—", "No generado")
             continue
 
         meta = get_repo_metadata(repo_path)
-        analysis = run_ripley_analysis(repo_path)
+        analysis = run_ripley_analysis(repo_path, guide=guide)
+        rev_str = resolve_submission_revision(repo_path, s_name)
 
-        report_file = workspace_dir / f"{s_name}.md"
+        report_file = repo_path / f"{s_name}_{rev_str}.md"
         generate_student_report(
-            exercise=exercise,
+            exercise=exercise_slug,
             student=s_name,
             repo_path=repo_path,
             metadata=meta,
             analysis=analysis,
             template_dir=template_dir,
             output_file=report_file,
+            revision=rev_str,
+            guide=guide,
         )
 
         comp_ok = analysis.get("compilation", {}).get("success", False)
@@ -88,7 +103,12 @@ def cmd_eval(
         ast_count = len(analysis.get("ast_findings", []))
         ast_str = f"[yellow]{ast_count} obs[/yellow]" if ast_count > 0 else "[green]0 obs[/green]"
 
-        table.add_row(s_name, comp_str, tests_str, ast_str, report_file.name)
+        try:
+            display_path = str(report_file.relative_to(workspace_dir))
+        except ValueError:
+            display_path = str(report_file)
+
+        table.add_row(s_name, comp_str, tests_str, ast_str, display_path)
 
     console.print("\n")
     console.print(table)
@@ -104,12 +124,12 @@ def cmd_comment(
     pr_number: Optional[int] = typer.Option(None, "--pr", help="Número específico de PR (por defecto autodetecta el abierto)."),
 ) -> None:
     """Envía el informe Markdown generado como comentario en el Pull Request de GitHub."""
-    report_file = Path.cwd() / f"{student}.md"
-    if not report_file.exists():
-        console.print(f"[bold red]No se encontró el informe '{report_file.name}'. Ejecute primero 'dredd eval'.[/bold red]")
+    report_file = find_student_report(Path.cwd(), exercise, student)
+    if not report_file or not report_file.exists():
+        console.print(f"[bold red]No se encontró el informe para '{student}'. Ejecute primero 'dredd eval'.[/bold red]")
         raise typer.Exit(code=1)
 
-    console.print(f"Publicando feedback para [cyan]{student}[/cyan] en GitHub...")
+    console.print(f"Publicando feedback para [cyan]{student}[/cyan] ({report_file.name}) en GitHub...")
     try:
         post_pr_comment(org, student, report_file, pr_number=pr_number)
         console.print("[bold green]✓ Comentario publicado con éxito en el Pull Request.[/bold green]")
@@ -122,13 +142,13 @@ def cmd_comment(
 
 @app.command("plagiarism")
 def cmd_plagiarism(
-    exercise: str = typer.Argument(..., help="Nombre de la actividad a auditar."),
+    exercise: str = typer.Argument(..., help="Nombre de la actividad o directorio de entregas a auditar."),
     threshold: float = typer.Option(0.60, "--threshold", "-th", help="Umbral de similitud mínima (0.0 a 1.0)."),
     strip_template: Optional[Path] = typer.Option(None, "--strip-template",
         help="boiler-strip: plantilla/archivo(s) de cátedra a eliminar antes de calcular similitud."),
 ) -> None:
     """Calcula la matriz de similitud Winnowing entre todas las entregas descargadas."""
-    submissions_dir = Path.cwd() / f"{exercise}-submissions"
+    exercise_slug, submissions_dir = resolve_submissions_dir(Path.cwd(), exercise)
     if not submissions_dir.is_dir():
         console.print(f"[bold red]Directorio inexistente: {submissions_dir}[/bold red]")
         raise typer.Exit(code=1)
@@ -143,7 +163,7 @@ def cmd_plagiarism(
         console.print(f"\n[bold green]✓ No se detectaron pares con similitud superior al {threshold*100:.0f}%.[/bold green]\n")
         return
 
-    table = Table(title=f"Auditoría de Similitud y Plagio — {exercise}")
+    table = Table(title=f"Auditoría de Similitud y Plagio — {exercise_slug}")
     table.add_column("Estudiante A", style="cyan")
     table.add_column("Estudiante B", style="cyan")
     table.add_column("Similitud", justify="center", style="bold red")
@@ -168,8 +188,9 @@ def cmd_pr_fix(
     from dredd.core.github_api import create_or_repair_pr
 
     workspace_dir = Path.cwd()
+    exercise_slug, submissions_dir = resolve_submissions_dir(workspace_dir, exercise)
     try:
-        repo_path = ensure_submission_repo(org, exercise, student, workspace_dir)
+        repo_path = ensure_submission_repo(org, exercise_slug, student, workspace_dir, submissions_dir=submissions_dir)
         console.print(f"Reconstruyendo PR de corrección para [cyan]{student}[/cyan]...")
         ok = create_or_repair_pr(org, student, repo_path, branch_name=branch)
         if ok:
@@ -184,16 +205,27 @@ def cmd_pr_fix(
 
 @app.command("map")
 def cmd_map(
-    activity: str = typer.Argument(..., help="Nombre / slug de la actividad a mapear (ej. tp01, entrega-1)."),
+    activity: str = typer.Argument(..., help="Nombre / slug de la actividad o directorio de entregas a mapear (ej. tp01, ./entrega-3_1238305/)."),
     exercises: Optional[List[str]] = typer.Option(None, "--exercise", "-e", help="Nombres de los ejercicios disponibles (ej. -e ej1 -e ej2)."),
     unmapped_only: bool = typer.Option(False, "--unmapped-only", "-u", help="Revisar únicamente archivos no vinculados."),
     auto: bool = typer.Option(False, "--auto", "-a", help="Aplicar coincidencias heurísticas obvias automáticamente."),
 ) -> None:
-    """Mapeo interactivo y heurístico entre archivos C de estudiantes y casos de prueba."""
+    """Mapeo interactivo y heurístico entre archivos C de estudiantes y especificaciones de la guía."""
     from dredd.core.mapping import InteractiveMapper
 
-    mapper = InteractiveMapper(Path.cwd(), activity, console=console)
-    avail = list(exercises) if exercises else ["ejercicio1", "ejercicio2", "ejercicio3"]
+    workspace_dir = Path.cwd()
+    exercise_slug, submissions_dir = resolve_submissions_dir(workspace_dir, activity)
+    guide = load_activity_guide(submissions_dir, exercise_slug, workspace_dir)
+
+    if exercises:
+        avail = list(exercises)
+    elif guide and guide.exercises:
+        avail = guide.get_exercise_ids()
+        console.print(f"[bold green]✓ Guía Deckard conectada ('{guide.nombre}'): {len(avail)} ejercicio(s) ({', '.join(avail)})[/bold green]")
+    else:
+        avail = ["ejercicio1", "ejercicio2", "ejercicio3"]
+
+    mapper = InteractiveMapper(workspace_dir, exercise_slug, console=console, submissions_dir=submissions_dir)
     changes = mapper.run_interactive_session(avail, unmapped_only=unmapped_only, auto_apply=auto)
     console.print(f"[bold green]✓ Sesión finalizada: {changes} mapeo(s) actualizados.[/bold green]")
 

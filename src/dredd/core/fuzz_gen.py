@@ -145,16 +145,9 @@ def compilar_modelo(fuente: Path, salida: Path,
                "-fno-omit-frame-pointer", "-o", str(salida), str(fuente), "-lm"]
         usa_fuzzer = True
     else:
-        gcc = shutil.which("gcc")
-        if gcc is None:
-            return False, "gcc no disponible", False
-        cmd = [gcc, "-std=c11", "-O2", "-Wall", "-o", str(salida), str(fuente), "-lm"]
-        usa_fuzzer = False
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    except subprocess.TimeoutExpired:
-        return False, "compilación excedió el timeout", usa_fuzzer
-    return proc.returncode == 0, proc.stderr[-800:], usa_fuzzer
+        from dredd.core.compiler import compile_c_sources
+        comp_res = compile_c_sources([fuente], output_bin=salida, extra_flags=["-std=c11", "-O2", "-Wall", "-lm"])
+        return comp_res.success, comp_res.raw_stderr[-800:], False
 
 
 def ejecutar_modelo(binario: Path, entrada: str,

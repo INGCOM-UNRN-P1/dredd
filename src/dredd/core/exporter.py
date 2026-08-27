@@ -28,19 +28,16 @@ class MoodleExporter:
         self.workspace_dir = Path(workspace_dir)
 
     def _get_all_activity_data(self, activity_slug: str) -> List[Dict[str, Any]]:
-        activity_dir = self.workspace_dir / activity_slug
+        from dredd.core.git_ops import resolve_submissions_dir
+
+        _, activity_dir = resolve_submissions_dir(self.workspace_dir, activity_slug)
         if not activity_dir.exists():
-            # Intentar con sufijo -submissions
-            alt_dir = self.workspace_dir / f"{activity_slug}-submissions"
-            if alt_dir.exists():
-                activity_dir = alt_dir
-            else:
-                raise FileNotFoundError(f"Directorio de actividad no encontrado: {activity_dir}")
+            raise FileNotFoundError(f"Directorio de actividad no encontrado: {activity_dir}")
 
         students_data: List[Dict[str, Any]] = []
 
         for s_dir in sorted(activity_dir.iterdir()):
-            if not s_dir.is_dir() or s_dir.name.startswith("."):
+            if not s_dir.is_dir() or s_dir.name.startswith(".") or s_dir.name in ("guia", "guide", "templates", "informe"):
                 continue
 
             db_path = s_dir / ".metadata.db"
@@ -80,13 +77,16 @@ class MoodleExporter:
                             grade_tests = eval_row["grade_tests"]
 
             clean_slug = Path(activity_slug).name or activity_slug.strip("/\\")
-            rep_candidate = s_dir / f"{s_dir.name}_{clean_slug}.md"
+            rep_candidate = s_dir / f"{s_dir.name}_r{version_num}.md"
+            if not rep_candidate.exists():
+                rep_candidate = s_dir / f"{s_dir.name}_{clean_slug}.md"
             if not rep_candidate.exists():
                 if (s_dir / f"{s_dir.name}.md").exists():
                     rep_candidate = s_dir / f"{s_dir.name}.md"
                 else:
                     mds = [f for f in s_dir.glob("*.md") if f.is_file()]
                     if mds:
+                        mds.sort(key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
                         rep_candidate = mds[0]
 
             s_dict = {
