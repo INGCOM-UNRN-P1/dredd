@@ -100,3 +100,46 @@ def test_generate_plagiarism_html_report(tmp_path: Path):
     assert "alumno_a" in content
     assert "alumno_b" in content
     assert "95.0%" in content
+
+
+def test_reformat_submission_to_rn_f_loose_files(tmp_path: Path):
+    from dredd.core.reformat import reformat_submission_to_rn_f
+    student_dir = tmp_path / "perez_juan_123"
+    student_dir.mkdir()
+    (student_dir / "ejercicio1.c").write_text("int main() { return 0; }")
+    (student_dir / "ejercicio2.c").write_text("int main() { return 0; }")
+
+    res_dir = reformat_submission_to_rn_f(student_dir)
+    assert res_dir == student_dir / "r1_f"
+    assert (student_dir / "r1_f" / "ejercicio1.c").is_file()
+    assert (student_dir / "r1_f" / "ejercicio2.c").is_file()
+    assert not (student_dir / "ejercicio1.c").exists()
+
+
+def test_reformat_submission_to_rn_f_nested_wrapper(tmp_path: Path):
+    from dredd.core.reformat import reformat_submission_to_rn_f
+    student_dir = tmp_path / "martinez_franco_456"
+    student_dir.mkdir()
+    wrapper_dir = student_dir / "Entrag 1. Franco Martinez"
+    wrapper_dir.mkdir()
+    (wrapper_dir / "ejercicio-1.c").write_text("int main() { return 0; }")
+
+    res_dir = reformat_submission_to_rn_f(student_dir)
+    assert res_dir == student_dir / "r1_f"
+    assert (student_dir / "r1_f" / "ejercicio-1.c").is_file()
+    assert not wrapper_dir.exists()
+
+
+def test_reformat_submission_to_rn_f_migrate_r1(tmp_path: Path):
+    from dredd.core.reformat import reformat_submission_to_rn_f
+    student_dir = tmp_path / "gomez_789"
+    student_dir.mkdir()
+    old_r1 = student_dir / "r1"
+    old_r1.mkdir()
+    (old_r1 / "main.c").write_text("int main() { return 0; }")
+
+    res_dir = reformat_submission_to_rn_f(student_dir)
+    assert res_dir == student_dir / "r1_f"
+    assert (student_dir / "r1_f" / "main.c").is_file()
+    assert not old_r1.exists()
+

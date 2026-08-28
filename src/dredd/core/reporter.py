@@ -21,16 +21,21 @@ def resolve_submission_revision(repo_path: Path, student_slug: str) -> str:
             except Exception:
                 pass
 
-    # 2. Si la carpeta misma es rN (ej: .../alumno1/r1)
-    if repo_path.name.startswith("r") and repo_path.name[1:].isdigit():
-        return repo_path.name
+    # 2. Si la carpeta misma es rN o rN_f (ej: .../alumno1/r1_f o .../alumno1/r1)
+    m_self = re.match(r"^r(\d+)(?:_f)?$", repo_path.name, re.IGNORECASE)
+    if m_self:
+        return f"r{m_self.group(1)}"
 
-    # 3. Si contiene subcarpetas rN
+    # 3. Si contiene subcarpetas rN o rN_f
     if repo_path.is_dir():
-        rev_dirs = [d.name for d in repo_path.iterdir() if d.is_dir() and d.name.startswith("r") and d.name[1:].isdigit()]
-        if rev_dirs:
-            rev_dirs.sort(key=lambda x: int(x[1:]))
-            return rev_dirs[-1]
+        rev_nums = []
+        for d in repo_path.iterdir():
+            if d.is_dir():
+                m_sub = re.match(r"^r(\d+)(?:_f)?$", d.name, re.IGNORECASE)
+                if m_sub:
+                    rev_nums.append(int(m_sub.group(1)))
+        if rev_nums:
+            return f"r{max(rev_nums)}"
 
     # 4. Si ya existen informes rN en la carpeta
     if repo_path.is_dir():

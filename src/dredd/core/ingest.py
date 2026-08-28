@@ -236,7 +236,7 @@ class MoodleIngestor:
                             next_version = latest_rev["version_num"] + 1
 
                     if is_new:
-                        rev_folder_name = f"r{next_version}"
+                        rev_folder_name = f"r{next_version}_f"
                         rev_dir = student_dir / rev_folder_name
                         rev_dir.mkdir(parents=True, exist_ok=True)
 

@@ -77,15 +77,18 @@ def cmd_eval(
             table.add_row(s_name, "[red]ERROR[/red]", "—", "—", "No generado")
             continue
 
-        meta = get_repo_metadata(repo_path)
-        analysis = run_ripley_analysis(repo_path, guide=guide)
-        rev_str = resolve_submission_revision(repo_path, s_name)
+        from dredd.core.reformat import reformat_submission_to_rn_f
+        eval_path = reformat_submission_to_rn_f(repo_path)
+
+        meta = get_repo_metadata(eval_path)
+        analysis = run_ripley_analysis(eval_path, guide=guide)
+        rev_str = resolve_submission_revision(eval_path, s_name)
 
         report_file = repo_path / f"{s_name}_{rev_str}.md"
         generate_student_report(
             exercise=exercise_slug,
             student=s_name,
-            repo_path=repo_path,
+            repo_path=eval_path,
             metadata=meta,
             analysis=analysis,
             template_dir=template_dir,
