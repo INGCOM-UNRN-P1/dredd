@@ -288,6 +288,8 @@ def test_write_individual_tool_reports_and_consolidation(tmp_path: Path):
     assert (r1i_dir / "kaneda.md").is_file()
     assert (r1i_dir / "spunkmeyer.md").is_file()
     assert (r1i_dir / "tests.md").is_file()
+    assert (r1i_dir / "valgrind.md").is_file()
+    assert (r1i_dir / "gaff.md").is_file()
 
     # Agregar un reporte arbitrario de otra herramienta en r1i
     (r1i_dir / "bishop.md").write_text("## Visualización de Memoria (Stack/Heap)\n\n| Variable | Dirección | Valor |\n| :--- | :--- | :--- |\n| `ptr` | `0x7ffd10` | `0x55aa` |\n")
@@ -309,6 +311,8 @@ def test_write_individual_tool_reports_and_consolidation(tmp_path: Path):
     assert "Daedalus" in content
     assert "Ripley" in content
     assert "Kaneda" in content
+    assert "Valgrind" in content
+    assert "Gaff" in content or "Estilo" in content
     assert "Bishop" in content or "Visualización de Memoria" in content
     assert "0x1001h" in content
     assert "SEC_EVASION" in content

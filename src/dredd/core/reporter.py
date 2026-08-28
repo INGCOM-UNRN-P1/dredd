@@ -163,22 +163,97 @@ def write_individual_tool_reports(
 
     # 5. Tests (Casos de prueba y Sandbox)
     tests = analysis.get("tests", {})
-    test_lines = ["## Pruebas Funcionales y Chequeo de Memoria — Sandbox"]
-    if tests.get("total", 0) > 0:
-        test_lines.append(f"\n**Resultado general:** {tests.get('passed', 0)} / {tests.get('total', 0)} pruebas aprobadas.\n")
-        test_lines.append("| Caso | Estado | Fuga de Memoria | Detalle |")
-        test_lines.append("| :--- | :---: | :---: | :--- |")
-        for tc in tests.get("cases", []):
-            st = "✓ PASÓ" if tc.get("passed") else "✗ FALLÓ"
-            leak = "SI (Leak)" if tc.get("memory_leak") else "NO"
+    test_lines = ["## Pruebas Funcionales y Casos de Test — Sandbox"]
+    cases = tests.get("cases", [])
+    if tests.get("total", 0) > 0 or cases:
+        passed_cnt = tests.get("passed", sum(1 for c in cases if c.get("passed")))
+        total_cnt = tests.get("total", len(cases))
+        rate = (passed_cnt / total_cnt * 100) if total_cnt > 0 else 0
+        test_lines.append(f"\n**Resultado general:** {passed_cnt} / {total_cnt} pruebas aprobadas ({rate:.1f}% de éxito).\n")
+        test_lines.append("| Caso de Prueba | Estado | Código Retorno | Fuga Memoria | Diagnóstico |")
+        test_lines.append("| :--- | :---: | :---: | :---: | :--- |")
+        failed_cases = []
+        for tc in cases:
+            st = "✓ PASÓ" if tc.get("passed") else "❌ FALLÓ"
+            ret = str(tc.get("return_code", 0))
+            leak = "⚠️ SÍ (Leak)" if tc.get("memory_leak") else "✓ NO"
             err = tc.get("sanitizer_error", "") or ""
             err_summary = err.splitlines()[0] if err else ("Timeout" if tc.get("timed_out") else "OK")
-            test_lines.append(f"| `{tc.get('name')}` | **{st}** | {leak} | {err_summary} |")
+            test_lines.append(f"| `{tc.get('name')}` | **{st}** | `{ret}` | {leak} | {err_summary} |")
+            if not tc.get("passed"):
+                failed_cases.append(tc)
+
+        if failed_cases:
+            test_lines.append("\n### 🔍 Detalle de Casos de Prueba Fallidos\n")
+            for fc in failed_cases:
+                test_lines.append(f"#### Caso: `{fc.get('name')}`")
+                if fc.get("input_data"):
+                    test_lines.append(f"- **Entrada (`stdin`):**\n```text\n{fc.get('input_data').strip()}\n```")
+                if fc.get("expected_output"):
+                    test_lines.append(f"- **Salida esperada:**\n```text\n{fc.get('expected_output').strip()}\n```")
+                if fc.get("actual_output"):
+                    test_lines.append(f"- **Salida obtenida:**\n```text\n{fc.get('actual_output').strip()}\n```")
+                if fc.get("diff"):
+                    test_lines.append(f"- **Diferencia (Diff):**\n```diff\n{fc.get('diff').strip()}\n```")
+                if fc.get("sanitizer_error"):
+                    test_lines.append(f"- **Error / Diagnóstico:** {fc.get('sanitizer_error')}\n")
     else:
         test_lines.append("\n*No se ejecutaron casos de prueba automatizados para esta entrega.*")
     test_path = rni_dir / "tests.md"
     test_path.write_text("\n".join(test_lines) + "\n", encoding="utf-8")
     generated["tests"] = test_path
+
+    # 6. Valgrind (Auditoría de Memoria Dinámica / Heap)
+    val = analysis.get("valgrind", {})
+    val_lines = ["## Auditoría de Memoria Dinámica — Valgrind"]
+    if val.get("executed"):
+        if val.get("clean"):
+            val_lines.append("\n✓ **Estado:** Sin fugas de memoria ni accesos inválidos (0 bytes perdidos en 0 bloques).")
+        else:
+            val_lines.append("\n❌ **Estado:** Se detectaron problemas de gestión de memoria dinámica:")
+            val_lines.append(f"- **Fuga definitivamente perdida (definitely lost):** `{val.get('definitely_lost_bytes', 0)}` bytes en `{val.get('definitely_lost_blocks', 0)}` bloque(s)")
+            val_lines.append(f"- **Fuga indirectamente perdida (indirectly lost):** `{val.get('indirectly_lost_bytes', 0)}` bytes en `{val.get('indirectly_lost_blocks', 0)}` bloque(s)")
+            val_lines.append(f"- **Fuga posiblemente perdida (possibly lost):** `{val.get('possibly_lost_bytes', 0)}` bytes en `{val.get('possibly_lost_blocks', 0)}` bloque(s)")
+            val_lines.append(f"- **Memoria aún alcanzable (still reachable):** `{val.get('still_reachable_bytes', 0)}` bytes en `{val.get('still_reachable_blocks', 0)}` bloque(s)")
+            val_lines.append(f"- **Total de errores de contexto (ERROR SUMMARY):** `{val.get('total_errors', 0)}`")
+
+            errs = val.get("errors", [])
+            if errs:
+                val_lines.append("\n| Tipo de Error | Diagnóstico |")
+                val_lines.append("| :--- | :--- |")
+                for e in errs[:10]:
+                    val_lines.append(f"| **{e.get('kind')}** | `{e.get('message')}` |")
+    else:
+        cases_leaks = [c for c in cases if c.get("memory_leak")]
+        if cases_leaks:
+            val_lines.append(f"\n❌ **Estado:** Se detectaron fugas de memoria en **{len(cases_leaks)}** caso(s) de prueba:")
+            for cl in cases_leaks:
+                val_lines.append(f"- Caso `{cl.get('name')}`: Fuga de memoria / Sanitizer error.")
+        else:
+            val_lines.append("\n✓ **Estado:** No se detectaron fugas de memoria durante las pruebas en sandbox.")
+    val_path = rni_dir / "valgrind.md"
+    val_path.write_text("\n".join(val_lines) + "\n", encoding="utf-8")
+    generated["valgrind"] = val_path
+
+    # 7. Gaff (Linter de Estilo y Formato)
+    style_findings = analysis.get("style_findings", [])
+    gaff_lines = ["## Linter de Estilo y Formato — Gaff"]
+    if style_findings:
+        gaff_lines.append(f"\n⚠️ Se detectaron **{len(style_findings)}** observación(es) de estilo arquitectónico:\n")
+        gaff_lines.append("| Regla | Ubicación | Observación | Sugerencia | Autofix |")
+        gaff_lines.append("| :--- | :--- | :--- | :--- | :---: |")
+        for sf in style_findings:
+            rc = sf.get("rule_code", "GAFF")
+            loc = f"`{sf.get('file')}:{sf.get('line')}`"
+            msg = sf.get("message", "")
+            sug = sf.get("suggestion", "")
+            auto = "✓ Sí" if sf.get("autofixable") else "No"
+            gaff_lines.append(f"| `{rc}` | {loc} | {msg} | {sug} | {auto} |")
+    else:
+        gaff_lines.append("\n✓ **Estado:** Código conforme a las reglas de estilo de la cátedra (snake_case, sin tabs, líneas ≤ 80 caracteres).")
+    gaff_path = rni_dir / "gaff.md"
+    gaff_path.write_text("\n".join(gaff_lines) + "\n", encoding="utf-8")
+    generated["gaff"] = gaff_path
 
     return generated
 
@@ -226,7 +301,7 @@ def generate_consolidated_report_from_rni(
     lines.append("\n## Análisis de Código C e Informes de Herramientas")
 
     # 3. Incorporar informes modulares desde rNi en orden pedagógico
-    priority_order = ["daedalus.md", "ripley.md", "tests.md", "kaneda.md", "spunkmeyer.md", "gaff.md"]
+    priority_order = ["daedalus.md", "ripley.md", "tests.md", "valgrind.md", "gaff.md", "kaneda.md", "spunkmeyer.md"]
     included_files = set()
 
     if rni_dir.is_dir():
@@ -322,8 +397,16 @@ def generate_personalized_feedback_markdown(
         lines.append(f"**Versión:** `{revision}`")
 
     lines.append("\n### 📋 Resumen de Evaluación")
+    val = analysis.get("valgrind", {})
+    style = analysis.get("style_findings", [])
+
     lines.append(f"- **Compilación ({comp.get('compiler_used', 'GCC').upper()}):** {'✓ Exitosa' if comp.get('success') else '✖ Falló'}")
     lines.append(f"- **Reglas P1 / Calidad:** {len(ast)} observación(es) detectada(s)")
+    lines.append(f"- **Estilo y Formato (Gaff):** {'✓ Conforme' if not style else f'⚠️ {len(style)} observación(es)'}")
+    if val.get("executed"):
+        val_lost = val.get("definitely_lost_bytes", 0)
+        val_msg = "✓ Sin fugas (0 bytes perdidos)" if val.get("clean") else f"❌ Fuga detectada ({val_lost} B perdidos)"
+        lines.append(f"- **Memoria Dinámica (Valgrind):** {val_msg}")
     if tests.get("total", 0) > 0:
         lines.append(f"- **Casos de prueba:** {tests.get('passed', 0)}/{tests.get('total', 0)} aprobados")
 
@@ -337,13 +420,18 @@ def generate_personalized_feedback_markdown(
     for f in ast:
         if f.get("suggestion"):
             issues.append(f"{f.get('rule_code', 'P1')}: {f['suggestion']}")
+    for sf in style:
+        if sf.get("suggestion"):
+            issues.append(f"{sf.get('rule_code', 'GAFF')}: {sf['suggestion']}")
+    if val.get("executed") and not val.get("clean"):
+        issues.append("Liberar toda la memoria dinámica reservada con malloc/calloc usando free() antes de terminar.")
     for tc in tests.get("cases", []):
         if not tc.get("passed"):
             issues.append(f"Revisar caso `{tc.get('name')}`: verificar lógica o manejo de límites.")
 
     if issues:
         lines.append("\n### 🔧 Pasos sugeridos para la próxima entrega:")
-        for idx, iss in enumerate(issues[:6], 1):
+        for idx, iss in enumerate(issues[:8], 1):
             lines.append(f"{idx}. {iss}")
 
     lines.append("\n---\n*Cátedra de Programación 1 · Evaluación automatizada con Dredd*")

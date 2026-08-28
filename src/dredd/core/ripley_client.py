@@ -4,11 +4,126 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 from dredd.core.compiler import compile_c_sources
 from dredd.core.sandbox import execute_sandboxed, audit_sandbox_evasion
+from dredd.core.valgrind import run_valgrind_check, ValgrindReport
+
+
+def audit_style_with_gaff(target_path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Ejecuta el linter de estilo Gaff sobre los archivos C y H del estudiante."""
+    findings = []
+    c_and_h_files = sorted([
+        f for f in target_path.glob("**/*")
+        if f.is_file() and f.suffix.lower() in (".c", ".h", ".hpp") and not any(p.startswith(".") for p in f.parts)
+    ])
+
+    try:
+        from gaff.core.linter import analizar_archivo
+        for f in c_and_h_files:
+            viols = analizar_archivo(f)
+            for v in viols:
+                findings.append({
+                    "rule_code": v.codigo,
+                    "title": v.titulo,
+                    "file": f.name,
+                    "line": v.linea,
+                    "column": v.columna,
+                    "message": v.mensaje,
+                    "suggestion": v.sugerencia,
+                    "autofixable": getattr(v, "es_autofixable", False),
+                })
+    except ImportError:
+        # Fallback de linter de estilo si gaff no está instalado como paquete Python
+        for f in c_and_h_files:
+            try:
+                lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+                for idx, l in enumerate(lines, start=1):
+                    if len(l) > 80:
+                        findings.append({
+                            "rule_code": "GAFF009",
+                            "title": "Línea demasiado larga (> 80 columnas)",
+                            "file": f.name,
+                            "line": idx,
+                            "column": 81,
+                            "message": f"La línea tiene {len(l)} caracteres (máximo 80).",
+                            "suggestion": "Dividí la sentencia o expresión en múltiples líneas.",
+                            "autofixable": False,
+                        })
+                    if "\t" in l:
+                        findings.append({
+                            "rule_code": "GAFF010",
+                            "title": "Tabulaciones en código fuente",
+                            "file": f.name,
+                            "line": idx,
+                            "column": l.find("\t") + 1,
+                            "message": "Uso de tabuladores prohibido. Usar 4 espacios.",
+                            "suggestion": "Configurá tu editor para usar 4 espacios en lugar de tabuladores.",
+                            "autofixable": True,
+                        })
+            except Exception:
+                pass
+
+    metrics = {
+        "files_analyzed": len(c_and_h_files),
+        "total_style_violations": len(findings),
+    }
+    return findings, metrics
+
+
+def _run_single_case_in_sandbox(
+    bin_file: Path,
+    tc_name: str,
+    input_data: str,
+    expected_output: str,
+    workspace: Path,
+    timeout: float = 5.0,
+    max_memory_mb: int = 64,
+) -> Dict[str, Any]:
+    """Ejecuta un caso de prueba individual en sandbox y realiza verificación de Valgrind."""
+    retcode, stdout, stderr, timed_out = execute_sandboxed(
+        cmd=[str(bin_file)],
+        input_data=input_data,
+        timeout=timeout,
+        max_memory_mb=max_memory_mb,
+        workspace=workspace,
+    )
+    expected = expected_output.strip()
+    actual = stdout.strip()
+    passed = (retcode == 0) and (actual == expected or not expected) and not timed_out
+
+    # Auditoría Valgrind
+    val_report = run_valgrind_check(
+        cmd=[str(bin_file)],
+        input_data=input_data,
+        timeout=timeout,
+        workspace=workspace,
+    )
+    memory_leak = val_report.has_leaks or (val_report.total_errors > 0)
+
+    err_msg = stderr.strip() if retcode != 0 else (
+        f"Salida esperada:\n{expected}\nObtenida:\n{actual}" if not passed else ""
+    )
+
+    diff_str = ""
+    if not passed and expected and actual:
+        diff_str = f"--- Esperado\n+++ Obtenido\n- {expected}\n+ {actual}"
+
+    return {
+        "name": tc_name,
+        "passed": passed and not memory_leak,
+        "input_data": input_data,
+        "expected_output": expected,
+        "actual_output": actual,
+        "return_code": retcode,
+        "timed_out": timed_out,
+        "memory_leak": memory_leak,
+        "valgrind_report": val_report.to_dict(),
+        "sanitizer_error": err_msg,
+        "diff": diff_str,
+    }
 
 
 def evaluate_guide_testcases(
@@ -44,26 +159,14 @@ def evaluate_guide_testcases(
                     if not ex.test_cases:
                         continue
                     for tc in ex.test_cases:
-                        retcode, stdout, stderr, timed_out = execute_sandboxed(
-                            cmd=[str(bin_file)],
+                        case_res = _run_single_case_in_sandbox(
+                            bin_file=bin_file,
+                            tc_name=f"{ex.id} / {tc['nombre']}",
                             input_data=tc.get("entrada", ""),
-                            timeout=5.0,
-                            max_memory_mb=64,
+                            expected_output=tc.get("salida", ""),
                             workspace=target_path,
                         )
-                        expected = tc.get("salida", "").strip()
-                        actual = stdout.strip()
-                        passed = (retcode == 0) and (actual == expected or not expected) and not timed_out
-                        err_msg = stderr.strip() if retcode != 0 else (
-                            f"Salida esperada:\n{expected}\nObtenida:\n{actual}" if not passed else ""
-                        )
-                        results.append({
-                            "name": f"{ex.id} / {tc['nombre']}",
-                            "passed": passed,
-                            "memory_leak": False,
-                            "sanitizer_error": err_msg,
-                            "timed_out": timed_out,
-                        })
+                        results.append(case_res)
                 return results
 
         # 2. Modo Proyecto o Librería multi-archivo (compilar todos los .c juntos)
@@ -80,31 +183,22 @@ def evaluate_guide_testcases(
                             "name": f"{ex.id} / {tc['nombre']}",
                             "passed": False,
                             "memory_leak": False,
+                            "input_data": tc.get("entrada", ""),
+                            "expected_output": tc.get("salida", ""),
+                            "actual_output": "",
                             "sanitizer_error": f"Error de compilación de proyecto: {err_summary}",
                         })
                     continue
 
                 for tc in ex.test_cases:
-                    retcode, stdout, stderr, timed_out = execute_sandboxed(
-                        cmd=[str(bin_file)],
+                    case_res = _run_single_case_in_sandbox(
+                        bin_file=bin_file,
+                        tc_name=f"{ex.id} / {tc['nombre']}",
                         input_data=tc.get("entrada", ""),
-                        timeout=5.0,
-                        max_memory_mb=64,
+                        expected_output=tc.get("salida", ""),
                         workspace=target_path,
                     )
-                    expected = tc.get("salida", "").strip()
-                    actual = stdout.strip()
-                    passed = (retcode == 0) and (actual == expected or not expected) and not timed_out
-                    err_msg = stderr.strip() if retcode != 0 else (
-                        f"Salida esperada:\n{expected}\nObtenida:\n{actual}" if not passed else ""
-                    )
-                    results.append({
-                        "name": f"{ex.id} / {tc['nombre']}",
-                        "passed": passed,
-                        "memory_leak": False,
-                        "sanitizer_error": err_msg,
-                        "timed_out": timed_out,
-                    })
+                    results.append(case_res)
             return results
 
         # 3. Modo estándar: archivos individuales
@@ -129,32 +223,23 @@ def evaluate_guide_testcases(
                         "name": f"{ex.id} / {tc['nombre']}",
                         "passed": False,
                         "memory_leak": False,
+                        "input_data": tc.get("entrada", ""),
+                        "expected_output": tc.get("salida", ""),
+                        "actual_output": "",
                         "sanitizer_error": f"Error de compilación: {err_summary}",
                     })
                 continue
 
             # Ejecutar casos de prueba en sandbox con límites estrictos de RAM (64MB)
             for tc in ex.test_cases:
-                retcode, stdout, stderr, timed_out = execute_sandboxed(
-                    cmd=[str(bin_file)],
+                case_res = _run_single_case_in_sandbox(
+                    bin_file=bin_file,
+                    tc_name=f"{ex.id} / {tc['nombre']}",
                     input_data=tc.get("entrada", ""),
-                    timeout=5.0,
-                    max_memory_mb=64,
+                    expected_output=tc.get("salida", ""),
                     workspace=target_path,
                 )
-                expected = tc.get("salida", "").strip()
-                actual = stdout.strip()
-                passed = (retcode == 0) and (actual == expected or not expected) and not timed_out
-                err_msg = stderr.strip() if retcode != 0 else (
-                    f"Salida esperada:\n{expected}\nObtenida:\n{actual}" if not passed else ""
-                )
-                results.append({
-                    "name": f"{ex.id} / {tc['nombre']}",
-                    "passed": passed,
-                    "memory_leak": False,
-                    "sanitizer_error": err_msg,
-                    "timed_out": timed_out,
-                })
+                results.append(case_res)
 
     return results
 
@@ -191,22 +276,14 @@ def discover_and_run_local_testcases(target_path: Path) -> List[Dict[str, Any]]:
             expected = out_f.read_text(encoding="utf-8", errors="replace").strip() if out_f.is_file() else ""
             in_data = in_f.read_text(encoding="utf-8", errors="replace")
 
-            retcode, stdout, stderr, timed_out = execute_sandboxed(
-                cmd=[str(bin_file)],
+            case_res = _run_single_case_in_sandbox(
+                bin_file=bin_file,
+                tc_name=f"local / {in_f.name}",
                 input_data=in_data,
-                timeout=5.0,
-                max_memory_mb=64,
+                expected_output=expected,
                 workspace=target_path,
             )
-            actual = stdout.strip()
-            passed = (retcode == 0) and (actual == expected or not expected) and not timed_out
-            results.append({
-                "name": f"local / {in_f.name}",
-                "passed": passed,
-                "memory_leak": False,
-                "sanitizer_error": stderr.strip() if not passed else "",
-                "timed_out": timed_out,
-            })
+            results.append(case_res)
 
     return results
 
@@ -398,6 +475,46 @@ def run_ripley_analysis(
             "failed": sum(1 for c in all_tests if not c.get("passed")),
             "cases": all_tests,
         }
+
+    # 7. Consolidar reporte de Valgrind / Memoria
+    val_executed = False
+    val_clean = True
+    def_lost = 0
+    ind_lost = 0
+    pos_lost = 0
+    reach_lost = 0
+    tot_errs = 0
+    val_errors = []
+
+    for tc in all_tests:
+        v_rep = tc.get("valgrind_report")
+        if v_rep and v_rep.get("executed"):
+            val_executed = True
+            if not v_rep.get("clean"):
+                val_clean = False
+            def_lost += v_rep.get("definitely_lost_bytes", 0)
+            ind_lost += v_rep.get("indirectly_lost_bytes", 0)
+            pos_lost += v_rep.get("possibly_lost_bytes", 0)
+            reach_lost += v_rep.get("still_reachable_bytes", 0)
+            tot_errs += v_rep.get("total_errors", 0)
+            val_errors.extend(v_rep.get("errors", []))
+
+    res_dict["valgrind"] = {
+        "executed": val_executed,
+        "clean": val_clean and (def_lost == 0) and (ind_lost == 0) and (pos_lost == 0) and (tot_errs == 0),
+        "definitely_lost_bytes": def_lost,
+        "indirectly_lost_bytes": ind_lost,
+        "possibly_lost_bytes": pos_lost,
+        "still_reachable_bytes": reach_lost,
+        "total_errors": tot_errs,
+        "errors": val_errors,
+    }
+
+    # 8. Auditoría de estilo y convenciones arquitectónicas (Gaff)
+    if checks.gaff_enabled:
+        style_findings, style_metrics = audit_style_with_gaff(target_path)
+        res_dict["style_findings"] = style_findings
+        res_dict["style_metrics"] = style_metrics
 
     return res_dict
 
