@@ -488,6 +488,48 @@ def test_standalone_multiple_mains_compilation_and_rni_resumen(tmp_path: Path):
     assert "ejercicio3.c" in rep
 
 
+def test_eval_all_revisions_r1_and_r2(tmp_path: Path, monkeypatch):
+    """Verifica que dredd eval procesa todas las versiones existentes (r1, r2, ... rN)
+    generando los directorios rNf, rNi y los reportes individuales por cada versión."""
+    monkeypatch.chdir(tmp_path)
+    submissions_dir = tmp_path / "tp03-submissions"
+    student_dir = submissions_dir / "lopez_carlos_999"
+    r1_dir = student_dir / "r1"
+    r2_dir = student_dir / "r2"
+    r1_dir.mkdir(parents=True)
+    r2_dir.mkdir(parents=True)
+
+    (r1_dir / "tp.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    (r2_dir / "tp.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+
+    res = runner.invoke(app, [
+        "eval",
+        "tp03",
+        "lopez_carlos_999",
+        "-m", "archivos_individuales",
+    ])
+    assert res.exit_code == 0
+
+    # Revisión 1
+    assert (student_dir / "r1").is_dir()
+    assert (student_dir / "r1f").is_dir()
+    assert (student_dir / "r1i").is_dir()
+    assert (student_dir / "r1i" / "daedalus.md").is_file()
+    assert (student_dir / "r1i" / "resumen.md").is_file()
+    assert (student_dir / "r1i" / "ripley.md").is_file()
+    assert (student_dir / "lopez_carlos_999_r1.md").is_file()
+
+    # Revisión 2
+    assert (student_dir / "r2").is_dir()
+    assert (student_dir / "r2f").is_dir()
+    assert (student_dir / "r2i").is_dir()
+    assert (student_dir / "r2i" / "daedalus.md").is_file()
+    assert (student_dir / "r2i" / "resumen.md").is_file()
+    assert (student_dir / "r2i" / "ripley.md").is_file()
+    assert (student_dir / "lopez_carlos_999_r2.md").is_file()
+
+
+
 
 
 

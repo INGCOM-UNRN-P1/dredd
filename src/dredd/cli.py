@@ -128,47 +128,52 @@ def cmd_eval(
             table.add_row(s_name, "[red]ERROR[/red]", "—", "—", "No generado")
             continue
 
-        from dredd.core.reformat import reformat_submission_to_rn_f
-        eval_path = reformat_submission_to_rn_f(repo_path)
+        from dredd.core.reformat import reformat_submission_to_rn_f, find_existing_revision_folders
+        reformat_submission_to_rn_f(repo_path)
+        all_revs = find_existing_revision_folders(repo_path)
+        if not all_revs:
+            all_revs = [(1, repo_path)]
 
-        meta = get_repo_metadata(eval_path)
-        analysis = run_ripley_analysis(
-            eval_path,
-            guide=guide,
-            activity_slug=exercise_slug,
-            workspace_dir=workspace_dir,
-            tipo_entrega=effective_tipo,
-        )
-        rev_str = resolve_submission_revision(eval_path, s_name)
+        for rev_num, r_path in all_revs:
+            rev_str = f"r{rev_num}"
+            meta = get_repo_metadata(r_path)
+            analysis = run_ripley_analysis(
+                r_path,
+                guide=guide,
+                activity_slug=exercise_slug,
+                workspace_dir=workspace_dir,
+                tipo_entrega=effective_tipo,
+            )
 
-        report_file = repo_path / f"{s_name}_{rev_str}.md"
-        generate_student_report(
-            exercise=exercise_slug,
-            student=s_name,
-            repo_path=eval_path,
-            metadata=meta,
-            analysis=analysis,
-            template_dir=template_dir,
-            output_file=report_file,
-            revision=rev_str,
-            guide=guide,
-        )
+            report_file = repo_path / f"{s_name}_{rev_str}.md"
+            generate_student_report(
+                exercise=exercise_slug,
+                student=s_name,
+                repo_path=r_path,
+                metadata=meta,
+                analysis=analysis,
+                template_dir=template_dir,
+                output_file=report_file,
+                revision=rev_str,
+                guide=guide,
+            )
 
-        comp_ok = analysis.get("compilation", {}).get("success", False)
-        comp_str = "[green]OK[/green]" if comp_ok else "[red]FALLÓ[/red]"
+            comp_ok = analysis.get("compilation", {}).get("success", False)
+            comp_str = "[green]OK[/green]" if comp_ok else "[red]FALLÓ[/red]"
 
-        tests_info = analysis.get("tests", {})
-        tests_str = f"{tests_info.get('passed', 0)}/{tests_info.get('total', 0)}" if tests_info.get("total", 0) > 0 else "N/A"
+            tests_info = analysis.get("tests", {})
+            tests_str = f"{tests_info.get('passed', 0)}/{tests_info.get('total', 0)}" if tests_info.get("total", 0) > 0 else "N/A"
 
-        ast_count = len(analysis.get("ast_findings", []))
-        ast_str = f"[yellow]{ast_count} obs[/yellow]" if ast_count > 0 else "[green]0 obs[/green]"
+            ast_count = len(analysis.get("ast_findings", []))
+            ast_str = f"[yellow]{ast_count} obs[/yellow]" if ast_count > 0 else "[green]0 obs[/green]"
 
-        try:
-            display_path = str(report_file.relative_to(workspace_dir))
-        except ValueError:
-            display_path = str(report_file)
+            try:
+                display_path = str(report_file.relative_to(workspace_dir))
+            except ValueError:
+                display_path = str(report_file)
 
-        table.add_row(s_name, comp_str, tests_str, ast_str, display_path)
+            student_label = f"{s_name} [{rev_str}]" if len(all_revs) > 1 else s_name
+            table.add_row(student_label, comp_str, tests_str, ast_str, display_path)
 
     console.print("\n")
     console.print(table)
