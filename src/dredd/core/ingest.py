@@ -158,7 +158,23 @@ class MoodleIngestor:
             raise FileNotFoundError(f"El archivo ZIP no existe: {zip_file_path}")
 
         moodle_info = parse_moodle_zip_filename(zip_file_path)
-        activity_dir = self.workspace_dir / moodle_info.activity_slug
+
+        # Verificar si hay regla de mapeo en dredd.yaml
+        from dredd.core.config import load_dredd_config
+        cfg = load_dredd_config(self.workspace_dir)
+        rule = cfg.find_mapping_for_zip(zip_file_path.name) if cfg else None
+
+        if rule:
+            moodle_info.activity_slug = rule.entrega
+            if rule.titulo:
+                moodle_info.activity_name = rule.titulo
+            sub_dir_name = cfg.workspace.submissions_dir if cfg else ""
+            if sub_dir_name and (self.workspace_dir / sub_dir_name).is_dir():
+                activity_dir = self.workspace_dir / sub_dir_name / rule.entrega
+            else:
+                activity_dir = self.workspace_dir / rule.entrega
+        else:
+            activity_dir = self.workspace_dir / moodle_info.activity_slug
 
         with zipfile.ZipFile(zip_file_path, "r") as zf:
             namelist = zf.namelist()

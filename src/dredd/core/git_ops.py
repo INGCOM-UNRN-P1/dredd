@@ -41,6 +41,24 @@ def resolve_submissions_dir(workspace_dir: Path | str, exercise_or_path: Path | 
     if cand_ws.is_dir():
         return slug, cand_ws.resolve()
 
+    # 2b. Mapeo declarativo en dredd.yaml o subcarpeta submissions_dir
+    from dredd.core.config import load_dredd_config
+    cfg = load_dredd_config(ws)
+    if cfg:
+        rule = cfg.find_mapping_for_activity(slug) or cfg.find_mapping_for_zip(slug)
+        if rule:
+            target_slug = rule.entrega
+            for cand_cfg in [
+                ws / cfg.workspace.submissions_dir / target_slug,
+                ws / target_slug,
+                ws / f"{target_slug}-submissions",
+            ]:
+                if cand_cfg.is_dir():
+                    return target_slug, cand_cfg.resolve()
+        sub_root = ws / cfg.workspace.submissions_dir
+        if (sub_root / slug).is_dir():
+            return slug, (sub_root / slug).resolve()
+
     # 3. Si existe <slug> en el workspace
     cand_slug = ws / slug
     if cand_slug.is_dir():
@@ -57,6 +75,8 @@ def resolve_submissions_dir(workspace_dir: Path | str, exercise_or_path: Path | 
         return slug, cand_raw_sub.resolve()
 
     # 6. Fallback predeterminado para nuevas descargas/clonaciones
+    if cfg and cfg.workspace.submissions_dir:
+        return slug, (ws / cfg.workspace.submissions_dir / slug).resolve()
     return slug, (ws / f"{slug}-submissions").resolve()
 
 

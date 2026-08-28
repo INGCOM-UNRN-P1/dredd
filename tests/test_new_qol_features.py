@@ -143,3 +143,37 @@ def test_reformat_submission_to_rn_f_migrate_r1(tmp_path: Path):
     assert (student_dir / "r1_f" / "main.c").is_file()
     assert not old_r1.exists()
 
+
+def test_cmd_init_and_config_mapping(tmp_path: Path):
+    from dredd.core.config import load_dredd_config
+    from dredd.core.guide_integration import load_activity_guide
+
+    ws_dir = tmp_path / "mi_materia"
+    res = runner.invoke(app, ["init", str(ws_dir), "--name", "Programacion 1", "-z", "zips", "-e", "entregas", "-g", "guias"])
+    assert res.exit_code == 0
+    assert (ws_dir / "dredd.yaml").is_file()
+    assert (ws_dir / "zips").is_dir()
+    assert (ws_dir / "entregas").is_dir()
+    assert (ws_dir / "guias").is_dir()
+    assert (ws_dir / "guias" / "entrega_1" / "guia.yaml").is_file()
+
+    # Verificar carga de configuración y coincidencia de patrones ZIP
+    cfg = load_dredd_config(ws_dir)
+    assert cfg is not None
+    assert cfg.workspace.name == "Programacion 1"
+    
+    rule1 = cfg.find_mapping_for_zip("Entrega #1-12345.zip")
+    assert rule1 is not None
+    assert rule1.entrega == "entrega_1"
+    assert rule1.guia == "guias/entrega_1/guia.yaml"
+
+    rule3 = cfg.find_mapping_for_zip("TP3_entrega_3.zip")
+    assert rule3 is not None
+    assert rule3.entrega == "entrega_3"
+
+    # Verificar que load_activity_guide resuelve la guía mapeada en dredd.yaml
+    guide = load_activity_guide(ws_dir / "entregas" / "entrega_1", "entrega_1", workspace_dir=ws_dir)
+    assert guide is not None
+    assert len(guide.exercises) == 2
+
+

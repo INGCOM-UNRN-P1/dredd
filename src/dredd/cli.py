@@ -25,6 +25,36 @@ app.add_typer(moodle_app, name="moodle")
 console = Console()
 
 
+@app.command("init")
+def cmd_init(
+    path: Path = typer.Argument(Path("."), help="Directorio raíz donde inicializar el workspace de Dredd."),
+    name: str = typer.Option("Cátedra Programación 1", "--name", "-n", help="Nombre del espacio de trabajo o materia."),
+    zips_dir: str = typer.Option("zips", "--zips", "-z", help="Directorio para almacenar los archivos ZIP de Moodle."),
+    entregas_dir: str = typer.Option("entregas", "--entregas", "-e", help="Directorio para las entregas descompactadas."),
+    guias_dir: str = typer.Option("guias", "--guias", "-g", help="Directorio para las guías de Deckard."),
+    force: bool = typer.Option(False, "--force", "-f", help="Sobrescribir dredd.yaml si ya existe."),
+) -> None:
+    """Inicializa un espacio de trabajo de Dredd con carpetas estructuradas y mapeo declarativo en dredd.yaml."""
+    from dredd.core.config import init_workspace
+
+    root, config_file = init_workspace(
+        target_dir=path,
+        name=name,
+        zips_dir=zips_dir,
+        submissions_dir=entregas_dir,
+        guias_dir=guias_dir,
+        force=force,
+    )
+
+    console.print(f"\n[bold green]✓ Espacio de trabajo de Dredd inicializado con éxito en:[/bold green] [cyan]{root}[/cyan]\n")
+    console.print(f"  • [bold]Configuración central:[/bold] [cyan]{config_file}[/cyan]")
+    console.print(f"  • [bold]Directorio de ZIPs Moodle:[/bold] [cyan]{root / zips_dir}/[/cyan]")
+    console.print(f"  • [bold]Directorio de Entregas:[/bold] [cyan]{root / entregas_dir}/[/cyan]")
+    console.print(f"  • [bold]Directorio de Guías Deckard:[/bold] [cyan]{root / guias_dir}/[/cyan]")
+    console.print(f"  • [bold]Plantillas de informe:[/bold] [cyan]{root / 'plantillas'}/[/cyan]\n")
+    console.print("[dim]Editá dredd.yaml para configurar los patrones de archivos ZIP y sus guías de Deckard asociadas.[/dim]\n")
+
+
 @app.command("eval")
 def cmd_eval(
     exercise: str = typer.Argument(..., help="Nombre de la actividad / ejercicio o ruta al directorio de entregas (ej. tp01, ./entrega-3_1238305/)."),

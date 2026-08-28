@@ -199,6 +199,23 @@ def load_activity_guide(
 
     clean_slug = Path(activity_slug).name.rstrip("/\\") or activity_slug.strip("/\\")
 
+    # 0. Mapeo declarativo en dredd.yaml
+    from dredd.core.config import load_dredd_config
+    cfg = load_dredd_config(ws) or load_dredd_config(sub_dir)
+    if cfg:
+        cfg_guide_path = cfg.get_guide_path(clean_slug, ws)
+        if cfg_guide_path:
+            if cfg_guide_path.is_file() and cfg_guide_path.suffix in (".yaml", ".yml"):
+                g = _parse_guide_yaml_file(cfg_guide_path)
+                if g:
+                    return g
+            elif cfg_guide_path.is_dir():
+                gy = cfg_guide_path / "guia.yaml" if (cfg_guide_path / "guia.yaml").is_file() else cfg_guide_path / "guia.yml"
+                if gy.is_file():
+                    g = _parse_guide_yaml_file(gy, guide_dir=cfg_guide_path)
+                    if g:
+                        return g
+
     candidate_locations = [
         sub_dir / "guia",
         sub_dir / "guia.yaml",
