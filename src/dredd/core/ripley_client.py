@@ -206,18 +206,22 @@ def evaluate_guide_testcases(
             if not ex.test_cases:
                 continue
 
-            # Buscar archivos relevantes para este ejercicio
-            relevant_files = [f for f in c_files if ex.id.lower() in f.stem.lower() or f.stem.lower() in ex.id.lower()]
-            if not relevant_files:
-                relevant_files = c_files
+            # Buscar archivo relevante para este ejercicio
+            matched_files = [f for f in c_files if ex.id.lower() in f.stem.lower() or f.stem.lower() in ex.id.lower()]
+            candidate_files = matched_files if matched_files else c_files
 
-            bin_file = tmp_dir / f"test_{ex.id}"
-            comp_res = compile_c_sources(relevant_files, output_bin=bin_file)
-            if not comp_res.success:
-                err_summary = comp_res.raw_stderr.strip()[:300]
-                if comp_res.translated_diagnostics:
-                    d = comp_res.translated_diagnostics[0]
-                    err_summary = f"{d.get('translated_message', '')} ({d.get('suggestion', '')})"
+            compiled_bin = None
+            last_err = ""
+            for c_cand in candidate_files:
+                bin_file = tmp_dir / f"test_{ex.id}_{c_cand.stem}"
+                comp_res = compile_c_sources([c_cand], output_bin=bin_file)
+                if comp_res.success and bin_file.is_file():
+                    compiled_bin = bin_file
+                    break
+                else:
+                    last_err = comp_res.raw_stderr[:200]
+
+            if not compiled_bin:
                 for tc in ex.test_cases:
                     results.append({
                         "name": f"{ex.id} / {tc['nombre']}",
@@ -226,14 +230,14 @@ def evaluate_guide_testcases(
                         "input_data": tc.get("entrada", ""),
                         "expected_output": tc.get("salida", ""),
                         "actual_output": "",
-                        "sanitizer_error": f"Error de compilación: {err_summary}",
+                        "sanitizer_error": f"Error de compilación del ejercicio: {last_err}",
                     })
                 continue
 
             # Ejecutar casos de prueba en sandbox con límites estrictos de RAM (64MB)
             for tc in ex.test_cases:
                 case_res = _run_single_case_in_sandbox(
-                    bin_file=bin_file,
+                    bin_file=compiled_bin,
                     tc_name=f"{ex.id} / {tc['nombre']}",
                     input_data=tc.get("entrada", ""),
                     expected_output=tc.get("salida", ""),
@@ -311,9 +315,9 @@ def run_ripley_analysis(
         cli_override=tipo_entrega,
     ) if cfg else ("makefile" if (tipo_entrega in ("makefile", "proyecto", "libreria") or (target_path / "Makefile").is_file() or (target_path / "makefile").is_file()) else "archivos_individuales")
 
-    # 1. Intentar importación directa si Ripley está en el entorno Python
+    # 1. Intentar importación directa si Ripley está en el entorno Python (sólo para proyectos o librerías multi-archivo)
     res_dict = None
-    if checks.ripley_enabled and effective_mode != "makefile":
+    if checks.ripley_enabled and effective_mode in ("proyecto", "libreria"):
         try:
             from ripley.core.engine import analyze_target
             result = analyze_target(target_path)
@@ -321,8 +325,8 @@ def run_ripley_analysis(
         except ImportError:
             pass
 
-    # 2. Intentar ejecución vía comando CLI de ripley si no se obtuvo por import
-    if res_dict is None and checks.ripley_enabled and effective_mode != "makefile":
+    # 2. Intentar ejecución vía comando CLI de ripley si no se obtuvo por import (sólo modo proyecto)
+    if res_dict is None and checks.ripley_enabled and effective_mode in ("proyecto", "libreria"):
         ripley_bin = shutil.which("ripley") or shutil.which("ripley-check")
         if ripley_bin:
             try:
@@ -399,14 +403,37 @@ def run_ripley_analysis(
                 "metrics": {},
             }
         else:
-            comp_res = compile_c_sources(c_files, output_bin=None, compiler=checks.daedalus_compiler)
+            # Modo archivos individuales: compilar y auditar cada archivo por separado
+            file_compilations = {}
+            all_diags = []
+            all_stderrs = []
+            files_comp_ok = True
+
+            import tempfile
+            with tempfile.TemporaryDirectory() as tmp_d:
+                tmp_dir = Path(tmp_d)
+                for idx, c_f in enumerate(c_files):
+                    tmp_bin = tmp_dir / f"bin_eval_{idx}"
+                    comp_f = compile_c_sources([c_f], output_bin=tmp_bin)
+                    file_compilations[c_f.name] = {
+                        "success": comp_f.success,
+                        "raw_stderr": comp_f.raw_stderr,
+                        "translated_diagnostics": comp_f.translated_diagnostics,
+                        "compiler_used": comp_f.compiler_used,
+                    }
+                    if not comp_f.success:
+                        files_comp_ok = False
+                        all_stderrs.append(f"[{c_f.name}]:\n{comp_f.raw_stderr}")
+                    all_diags.extend(comp_f.translated_diagnostics)
+
             res_dict = {
                 "version": "2.0.0",
                 "compilation": {
-                    "success": comp_res.success,
-                    "raw_stderr": comp_res.raw_stderr,
-                    "translated_diagnostics": comp_res.translated_diagnostics,
-                    "compiler_used": comp_res.compiler_used,
+                    "success": files_comp_ok,
+                    "raw_stderr": "\n\n".join(all_stderrs),
+                    "translated_diagnostics": all_diags,
+                    "compiler_used": checks.daedalus_compiler,
+                    "files": file_compilations,
                 },
                 "ast_findings": ast_findings,
                 "tests": {"total": 0, "passed": 0, "failed": 0, "cases": []},

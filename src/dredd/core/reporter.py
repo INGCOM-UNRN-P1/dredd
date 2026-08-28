@@ -91,8 +91,55 @@ def write_individual_tool_reports(
     rni_dir.mkdir(parents=True, exist_ok=True)
     generated: Dict[str, Path] = {}
 
-    # 1. Daedalus (Compilación)
+    # 0. Resumen de Evaluación por Archivo (resumen.md)
     comp = analysis.get("compilation", {})
+    files_comp = comp.get("files", {})
+    ast_findings = analysis.get("ast_findings", [])
+    style_findings = analysis.get("style_findings", [])
+    tests = analysis.get("tests", {})
+    cases = tests.get("cases", [])
+    val = analysis.get("valgrind", {})
+
+    all_c_files = set(files_comp.keys())
+    for f in ast_findings:
+        if f.get("file"):
+            all_c_files.add(f.get("file"))
+    for sf in style_findings:
+        if sf.get("file"):
+            all_c_files.add(sf.get("file"))
+
+    if not all_c_files:
+        all_c_files.add("entrega_general")
+
+    res_lines = ["## Resumen de Evaluación por Archivo\n"]
+    res_lines.append("| Archivo | Estado Compilación | Evaluación de Estilo | Valgrind (Fugas) | Observaciones Cátedra |")
+    res_lines.append("| :--- | :---: | :---: | :---: | :--- |")
+    for f_name in sorted(all_c_files):
+        # Compilación
+        f_comp_ok = files_comp.get(f_name, {}).get("success", comp.get("success", True))
+        comp_badge = "✓ Compilación OK" if f_comp_ok else "❌ Falló Compilación"
+
+        # Estilo
+        f_style_viols = [sf for sf in style_findings if sf.get("file") == f_name]
+        style_score = max(0.0, 10.0 - (len(f_style_viols) * 0.5))
+        style_badge = f"{style_score:.1f}/10"
+
+        # Valgrind
+        f_val_leak = any(c.get("memory_leak") for c in cases if f_name in c.get("name", ""))
+        val_badge = "⚠️ Fuga detectada" if f_val_leak else "✓ Limpio (0 fugas)"
+
+        # Reglas
+        f_ast_viols = [af for af in ast_findings if af.get("file") == f_name]
+        total_viols = len(f_style_viols) + len(f_ast_viols)
+        obs_badge = f"{total_viols} advertencias" if total_viols > 0 else "Sin observaciones"
+
+        res_lines.append(f"| `{f_name}` | {comp_badge} | {style_badge} | {val_badge} | {obs_badge} |")
+    
+    res_path = rni_dir / "resumen.md"
+    res_path.write_text("\n".join(res_lines) + "\n", encoding="utf-8")
+    generated["resumen"] = res_path
+
+    # 1. Daedalus (Compilación)
     compiler_used = comp.get("compiler_used", "gcc").upper()
     comp_lines = [f"## Compilación — Daedalus ({compiler_used})"]
     if comp.get("success"):
@@ -101,29 +148,40 @@ def write_individual_tool_reports(
         comp_lines.append("\n❌ **Estado:** Falló la compilación.")
         if comp.get("human_summary"):
             comp_lines.append(f"\n**Diagnóstico general:** {comp['human_summary']}")
-        diags = comp.get("translated_diagnostics", [])
-        if diags:
-            comp_lines.append("\n| Archivo:Línea | Severidad | Mensaje Traducido | Sugerencia |")
-            comp_lines.append("| :--- | :---: | :--- | :--- |")
-            for d in diags:
-                sug = d.get("suggestion", "")
-                comp_lines.append(f"| `{d.get('file')}:{d.get('line')}` | **{d.get('severity')}** | {d.get('translated_message')} | {sug} |")
-        elif comp.get("raw_stderr"):
-            comp_lines.append("\n```text")
-            comp_lines.append(comp["raw_stderr"][:1200])
-            comp_lines.append("```")
+
+    if files_comp:
+        comp_lines.append("\n### Estado de Compilación por Archivo")
+        comp_lines.append("| Archivo | Estado | Compilador |")
+        comp_lines.append("| :--- | :---: | :---: |")
+        for f_name, f_data in sorted(files_comp.items()):
+            st = "✓ OK" if f_data.get("success") else "❌ Error"
+            cu = f_data.get("compiler_used", "gcc").upper()
+            comp_lines.append(f"| `{f_name}` | **{st}** | {cu} |")
+
+    diags = comp.get("translated_diagnostics", [])
+    if diags:
+        comp_lines.append("\n### Diagnósticos del Compilador Traducidos")
+        comp_lines.append("| Archivo:Línea | Severidad | Mensaje Traducido | Sugerencia |")
+        comp_lines.append("| :--- | :---: | :--- | :--- |")
+        for d in diags:
+            sug = d.get("suggestion", "")
+            comp_lines.append(f"| `{d.get('file')}:{d.get('line')}` | **{d.get('severity')}** | {d.get('translated_message')} | {sug} |")
+    elif comp.get("raw_stderr"):
+        comp_lines.append("\n```text")
+        comp_lines.append(comp["raw_stderr"][:1200])
+        comp_lines.append("```")
     daed_path = rni_dir / "daedalus.md"
     daed_path.write_text("\n".join(comp_lines) + "\n", encoding="utf-8")
     generated["daedalus"] = daed_path
 
     # 2. Ripley (Reglas P1 / AST)
-    ast_findings = [f for f in analysis.get("ast_findings", []) if not (f.get("rule_code") or "").startswith("SEC_") and not f.get("rule_name", "").startswith("[SEGURIDAD]")]
+    ast_p1_findings = [f for f in ast_findings if not (f.get("rule_code") or "").startswith("SEC_") and not f.get("rule_name", "").startswith("[SEGURIDAD]")]
     rip_lines = ["## Observaciones de Calidad y Reglas P1 — Ripley"]
-    if ast_findings:
-        rip_lines.append(f"\nSe detectaron **{len(ast_findings)}** observación(es) en el código C:\n")
+    if ast_p1_findings:
+        rip_lines.append(f"\nSe detectaron **{len(ast_p1_findings)}** observación(es) en el código C:\n")
         rip_lines.append("| Regla | Ubicación | Severidad | Observación | Sugerencia |")
         rip_lines.append("| :--- | :--- | :---: | :--- | :--- |")
-        for f in ast_findings:
+        for f in ast_p1_findings:
             rc = f.get("rule_code") or f.get("rule_id") or "P1"
             sug = f.get("suggestion", "")
             rip_lines.append(f"| `{rc}` | `{f.get('file')}:{f.get('line')}` | {f.get('severity')} | {f.get('message')} | {sug} |")
@@ -134,7 +192,7 @@ def write_individual_tool_reports(
     generated["ripley"] = rip_path
 
     # 3. Kaneda (Seguridad)
-    sec_findings = [f for f in analysis.get("ast_findings", []) if (f.get("rule_code") or "").startswith("SEC_") or f.get("rule_name", "").startswith("[SEGURIDAD]")]
+    sec_findings = [f for f in ast_findings if (f.get("rule_code") or "").startswith("SEC_") or f.get("rule_name", "").startswith("[SEGURIDAD]")]
     kan_lines = ["## Auditoría de Seguridad — Kaneda"]
     if sec_findings:
         kan_lines.append(f"\n⚠️ **Alerta:** Se detectaron **{len(sec_findings)}** llamadas o patrones de riesgo de seguridad:\n")
@@ -149,7 +207,7 @@ def write_individual_tool_reports(
     generated["kaneda"] = kan_path
 
     # 4. Spunkmeyer (Antipatrones Didácticos)
-    spk_findings = [f for f in ast_findings if "antipattern" in str(f.get("rule_id", "")).lower() or "feof" in str(f.get("message", "")).lower()]
+    spk_findings = [f for f in ast_p1_findings if "antipattern" in str(f.get("rule_id", "")).lower() or "feof" in str(f.get("message", "")).lower()]
     spk_lines = ["## Antipatrones Didácticos — Spunkmeyer"]
     if spk_findings:
         spk_lines.append(f"\nSe detectaron **{len(spk_findings)}** antipatrones didácticos:\n")
@@ -162,9 +220,7 @@ def write_individual_tool_reports(
     generated["spunkmeyer"] = spk_path
 
     # 5. Tests (Casos de prueba y Sandbox)
-    tests = analysis.get("tests", {})
     test_lines = ["## Pruebas Funcionales y Casos de Test — Sandbox"]
-    cases = tests.get("cases", [])
     if tests.get("total", 0) > 0 or cases:
         passed_cnt = tests.get("passed", sum(1 for c in cases if c.get("passed")))
         total_cnt = tests.get("total", len(cases))
@@ -204,7 +260,6 @@ def write_individual_tool_reports(
     generated["tests"] = test_path
 
     # 6. Valgrind (Auditoría de Memoria Dinámica / Heap)
-    val = analysis.get("valgrind", {})
     val_lines = ["## Auditoría de Memoria Dinámica — Valgrind"]
     if val.get("executed"):
         if val.get("clean"):
@@ -236,7 +291,6 @@ def write_individual_tool_reports(
     generated["valgrind"] = val_path
 
     # 7. Gaff (Linter de Estilo y Formato)
-    style_findings = analysis.get("style_findings", [])
     gaff_lines = ["## Linter de Estilo y Formato — Gaff"]
     if style_findings:
         gaff_lines.append(f"\n⚠️ Se detectaron **{len(style_findings)}** observación(es) de estilo arquitectónico:\n")
@@ -254,6 +308,38 @@ def write_individual_tool_reports(
     gaff_path = rni_dir / "gaff.md"
     gaff_path.write_text("\n".join(gaff_lines) + "\n", encoding="utf-8")
     generated["gaff"] = gaff_path
+
+    # 8. Similitud Winnowing (similarity.md) si está disponible
+    sim_data = analysis.get("plagiarism") or analysis.get("similarity")
+    if sim_data:
+        sim_lines = ["## Auditoría de Similitud de Código — Plagio"]
+        sim_score = sim_data.get("similarity_score", 0.0)
+        sim_lines.append(f"\n**Índice de similitud estructural:** `{sim_score * 100:.1f}%`")
+        if sim_data.get("matches"):
+            sim_lines.append("\n| Archivo Comparado | Porcentaje Similitud |")
+            sim_lines.append("| :--- | :---: |")
+            for m in sim_data["matches"]:
+                sim_lines.append(f"| `{m.get('target_file')}` | `{m.get('score', 0) * 100:.1f}%` |")
+        sim_path = rni_dir / "similarity.md"
+        sim_path.write_text("\n".join(sim_lines) + "\n", encoding="utf-8")
+        generated["similarity"] = sim_path
+
+    # 9. Preguntas de Defensa Oral (oral_questions.md) si están disponibles
+    oral_qs = analysis.get("oral_questions", [])
+    if oral_qs:
+        oral_lines = ["## Preguntas Guía para Defensa Oral de Código"]
+        oral_lines.append("\nPreguntas automáticas generadas para auditar la comprensión del estudiante:\n")
+        for i, q in enumerate(oral_qs, 1):
+            oral_lines.append(f"### Pregunta {i}: {q.get('pregunta', '')}")
+            if q.get("linea"):
+                oral_lines.append(f"- **Ubicación en código:** Línea `{q.get('linea')}`")
+            if q.get("concepto"):
+                oral_lines.append(f"- **Concepto evaluado:** {q.get('concepto')}")
+            if q.get("respuesta_esperada"):
+                oral_lines.append(f"- **Respuesta esperada:** {q.get('respuesta_esperada')}\n")
+        oral_path = rni_dir / "oral_questions.md"
+        oral_path.write_text("\n".join(oral_lines) + "\n", encoding="utf-8")
+        generated["oral_questions"] = oral_path
 
     return generated
 
@@ -301,7 +387,19 @@ def generate_consolidated_report_from_rni(
     lines.append("\n## Análisis de Código C e Informes de Herramientas")
 
     # 3. Incorporar informes modulares desde rNi en orden pedagógico
-    priority_order = ["daedalus.md", "ripley.md", "tests.md", "valgrind.md", "gaff.md", "kaneda.md", "spunkmeyer.md"]
+    priority_order = [
+        "resumen.md",
+        "daedalus.md",
+        "ripley.md",
+        "tests.md",
+        "valgrind.md",
+        "gaff.md",
+        "kaneda.md",
+        "spunkmeyer.md",
+        "diagramas.md",
+        "similarity.md",
+        "oral_questions.md",
+    ]
     included_files = set()
 
     if rni_dir.is_dir():

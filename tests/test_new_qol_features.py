@@ -426,6 +426,7 @@ def test_submission_triad_r1_r1f_r1i(tmp_path: Path):
         "style_findings": [],
     }
     write_individual_tool_reports(r1i_dir, analysis)
+    assert (r1i_dir / "resumen.md").is_file()
     assert (r1i_dir / "daedalus.md").is_file()
     assert (r1i_dir / "ripley.md").is_file()
     assert (r1i_dir / "kaneda.md").is_file()
@@ -433,6 +434,59 @@ def test_submission_triad_r1_r1f_r1i(tmp_path: Path):
     assert (r1i_dir / "tests.md").is_file()
     assert (r1i_dir / "valgrind.md").is_file()
     assert (r1i_dir / "gaff.md").is_file()
+
+
+def test_standalone_multiple_mains_compilation_and_rni_resumen(tmp_path: Path):
+    """Verifica que entregas con múltiples archivos con main() se compilan de forma aislada
+    sin colisión de enlazado, y se generan todas las secciones modulares en r1i."""
+    from dredd.core.ripley_client import run_ripley_analysis
+    from dredd.core.config import DreddConfig
+    from dredd.core.reporter import generate_student_report
+    from dredd.core.git_ops import RepoMetadata
+
+    student_dir = tmp_path / "entrega_alumno_mains"
+    r1_dir = student_dir / "r1"
+    r1_dir.mkdir(parents=True)
+
+    # Crear 3 ejercicios independientes, cada uno con main()
+    (r1_dir / "ejercicio1.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    (r1_dir / "ejercicio2.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    (r1_dir / "ejercicio3.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+
+    analysis = run_ripley_analysis(r1_dir, tipo_entrega="archivos_individuales")
+
+    # La compilación debe ser exitosa para todos sin error de multiple definition of main
+    assert analysis["compilation"]["success"] is True
+    assert "files" in analysis["compilation"]
+    assert "ejercicio1.c" in analysis["compilation"]["files"]
+    assert "ejercicio2.c" in analysis["compilation"]["files"]
+    assert "ejercicio3.c" in analysis["compilation"]["files"]
+
+    meta = RepoMetadata(branch="main", revision="r1", date_str="2026-08-28", files_list="ejercicio1.c\nejercicio2.c\nejercicio3.c")
+    out_file = student_dir / "informe_r1.md"
+    rep = generate_student_report(
+        exercise="tp02",
+        student="alumno_test",
+        repo_path=r1_dir,
+        metadata=meta,
+        analysis=analysis,
+        template_dir=tmp_path / "tpl",
+        output_file=out_file,
+        revision="r1",
+    )
+
+    r1i_dir = student_dir / "r1i"
+    assert (r1i_dir / "resumen.md").is_file()
+    assert (r1i_dir / "daedalus.md").is_file()
+    assert (r1i_dir / "ripley.md").is_file()
+    assert (r1i_dir / "gaff.md").is_file()
+
+    # El informe consolidado contiene la tabla resumen por archivo
+    assert "Resumen de Evaluación por Archivo" in rep
+    assert "ejercicio1.c" in rep
+    assert "ejercicio2.c" in rep
+    assert "ejercicio3.c" in rep
+
 
 
 
