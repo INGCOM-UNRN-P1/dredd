@@ -219,18 +219,24 @@ def run_ripley_analysis(
     checks_override: Optional[Any] = None,
     tipo_entrega: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Ejecuta el análisis técnico sobre la entrega del estudiante usando Ripley, Dredd y la guía de Deckard."""
     from dredd.core.config import load_dredd_config, ToolChecksConfig
 
+    cfg = load_dredd_config(workspace_dir or target_path)
     if checks_override:
         checks = checks_override
     else:
-        cfg = load_dredd_config(workspace_dir or target_path)
         checks = cfg.get_effective_checks(activity_slug) if cfg else ToolChecksConfig()
+
+    effective_mode = cfg.get_delivery_mode(
+        activity_slug=activity_slug,
+        guide_mode=getattr(guide, "tipo_entrega", None),
+        target_path=target_path,
+        cli_override=tipo_entrega,
+    ) if cfg else ("makefile" if (tipo_entrega in ("makefile", "proyecto", "libreria") or (target_path / "Makefile").is_file() or (target_path / "makefile").is_file()) else "archivos_individuales")
 
     # 1. Intentar importación directa si Ripley está en el entorno Python
     res_dict = None
-    if checks.ripley_enabled:
+    if checks.ripley_enabled and effective_mode != "makefile":
         try:
             from ripley.core.engine import analyze_target
             result = analyze_target(target_path)
@@ -239,7 +245,7 @@ def run_ripley_analysis(
             pass
 
     # 2. Intentar ejecución vía comando CLI de ripley si no se obtuvo por import
-    if res_dict is None and checks.ripley_enabled:
+    if res_dict is None and checks.ripley_enabled and effective_mode != "makefile":
         ripley_bin = shutil.which("ripley") or shutil.which("ripley-check")
         if ripley_bin:
             try:
@@ -254,10 +260,11 @@ def run_ripley_analysis(
             except Exception:
                 pass
 
-    # 3. Fallback nativo: compilación con ESPER / GCC + análisis AST nativo de Dredd
+    # 3. Fallback nativo: compilación según effective_mode + análisis AST nativo de Dredd
     if res_dict is None:
         from dredd.core.ast_checker import audit_c_file
         from dredd.core.makefile_eval import evaluate_makefile_exercises
+        from dredd.core.compiler import compile_with_make
 
         c_files = sorted([
             f for f in target_path.glob("**/*.c")
@@ -268,29 +275,44 @@ def run_ripley_analysis(
         for c_file in c_files:
             ast_findings.extend(audit_c_file(c_file))
 
-        makefile_results = evaluate_makefile_exercises(target_path)
-        if makefile_results:
-            all_passed = all(m.clean_ok and m.test_ok for m in makefile_results)
-            res_dict = {
-                "version": "2.0.0",
-                "compilation": {
-                    "success": all_passed,
-                    "raw_stderr": "\n".join(m.output_log for m in makefile_results),
-                    "translated_diagnostics": [],
-                    "compiler_used": "makefile",
-                },
-                "ast_findings": ast_findings,
-                "tests": {
-                    "total": len(makefile_results),
-                    "passed": sum(1 for m in makefile_results if m.test_ok),
-                    "failed": sum(1 for m in makefile_results if not m.test_ok),
-                    "cases": [
-                        {"name": m.exercise_name, "passed": m.test_ok, "memory_leak": False, "sanitizer_error": m.output_log if not m.test_ok else ""}
-                        for m in makefile_results
-                    ],
-                },
-                "metrics": {"c_files_count": len(c_files)},
-            }
+        if effective_mode == "makefile":
+            makefile_results = evaluate_makefile_exercises(target_path)
+            if not makefile_results and ((target_path / "Makefile").is_file() or (target_path / "makefile").is_file()):
+                comp_make = compile_with_make(target_path)
+                res_dict = {
+                    "version": "2.0.0",
+                    "compilation": {
+                        "success": comp_make.success,
+                        "raw_stderr": comp_make.raw_stderr,
+                        "translated_diagnostics": comp_make.translated_diagnostics,
+                        "compiler_used": "makefile",
+                    },
+                    "ast_findings": ast_findings,
+                    "tests": {"total": 0, "passed": 0, "failed": 0, "cases": []},
+                    "metrics": {"c_files_count": len(c_files)},
+                }
+            elif makefile_results:
+                all_passed = all(m.clean_ok and m.test_ok for m in makefile_results)
+                res_dict = {
+                    "version": "2.0.0",
+                    "compilation": {
+                        "success": all_passed,
+                        "raw_stderr": "\n".join(m.output_log for m in makefile_results),
+                        "translated_diagnostics": [],
+                        "compiler_used": "makefile",
+                    },
+                    "ast_findings": ast_findings,
+                    "tests": {
+                        "total": len(makefile_results),
+                        "passed": sum(1 for m in makefile_results if m.test_ok),
+                        "failed": sum(1 for m in makefile_results if not m.test_ok),
+                        "cases": [
+                            {"name": m.exercise_name, "passed": m.test_ok, "memory_leak": False, "sanitizer_error": m.output_log if not m.test_ok else ""}
+                            for m in makefile_results
+                        ],
+                    },
+                    "metrics": {"c_files_count": len(c_files)},
+                }
         elif not c_files:
             res_dict = {
                 "version": "2.0.0",

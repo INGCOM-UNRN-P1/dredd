@@ -314,5 +314,56 @@ def test_write_individual_tool_reports_and_consolidation(tmp_path: Path):
     assert "SEC_EVASION" in content
 
 
+def test_delivery_mode_override_hierarchy_and_families(tmp_path: Path):
+    from dredd.core.config import DreddConfig, MappingRule
+    from dredd.core.guide_integration import ActivityGuide, GuideExercise
+
+    cfg = DreddConfig(
+        mapeos=[
+            MappingRule(zip_pattern="*tp1*.zip", entrega="tp01", mode="makefile"),
+            MappingRule(zip_pattern="*tp2*.zip", entrega="tp02", mode="archivos_individuales"),
+        ]
+    )
+
+    # 1. Caso CLI override manda sobre todo
+    mode_cli = cfg.get_delivery_mode(activity_slug="tp02", guide_mode="archivos_individuales", cli_override="makefile")
+    assert mode_cli == "makefile"
+
+    # 2. Caso dredd.yaml manda sobre Deckard
+    mode_yaml = cfg.get_delivery_mode(activity_slug="tp01", guide_mode="archivos_individuales")
+    assert mode_yaml == "makefile"
+
+    # 3. Caso Deckard especifica cuando no hay override
+    mode_guide = cfg.get_delivery_mode(activity_slug="tp03", guide_mode="makefile")
+    assert mode_guide == "makefile"
+
+    # 4. Caso auto-detección por Makefile
+    sub_dir = tmp_path / "student_proj"
+    sub_dir.mkdir()
+    (sub_dir / "Makefile").write_text("all:\n\t@echo ok\n")
+    mode_auto = cfg.get_delivery_mode(activity_slug="tp04", target_path=sub_dir)
+    assert mode_auto == "makefile"
+
+    # 5. Familia de ejercicios (librería, tests, uso)
+    guide = ActivityGuide(
+        nombre="TDA Vector Dinámico",
+        guide_dir=tmp_path,
+        tipo_entrega="makefile",
+        familias=["tda_vector"],
+        exercises=[
+            GuideExercise(id="vector_lib", titulo="Lib", familia="tda_vector", rol_familia="libreria"),
+            GuideExercise(id="vector_tests", titulo="Tests", familia="tda_vector", rol_familia="tests", dependencias=["vector_lib"]),
+            GuideExercise(id="vector_app", titulo="App", familia="tda_vector", rol_familia="uso", dependencias=["vector_lib"]),
+        ],
+    )
+
+    family_ejs = guide.get_family_exercises("tda_vector")
+    assert len(family_ejs) == 3
+    assert len(guide.get_exercises_by_role("libreria")) == 1
+    assert len(guide.get_exercises_by_role("tests")) == 1
+    assert len(guide.get_exercises_by_role("uso")) == 1
+
+
+
 
 

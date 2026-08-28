@@ -20,10 +20,15 @@ class GuideExercise:
     exercise_dir: Optional[Path] = None
     functions: List[str] = field(default_factory=list)
     tipo_entrega: str = "archivos_individuales"
+    familia: Optional[str] = None
+    rol_familia: Optional[str] = None  # "libreria", "tests", "uso", "app"
+    dependencias: List[str] = field(default_factory=list)
+    archivos_requeridos: List[str] = field(default_factory=list)
 
     @property
     def display_name(self) -> str:
-        return f"{self.id} ({self.titulo})" if self.titulo else self.id
+        suffix = f" [{self.familia}:{self.rol_familia}]" if self.familia and self.rol_familia else ""
+        return f"{self.id} ({self.titulo}){suffix}" if self.titulo else f"{self.id}{suffix}"
 
 
 @dataclass
@@ -33,6 +38,7 @@ class ActivityGuide:
     exercises: List[GuideExercise] = field(default_factory=list)
     raw_meta: Dict[str, Any] = field(default_factory=dict)
     tipo_entrega: str = "archivos_individuales"
+    familias: List[str] = field(default_factory=list)
 
     def get_exercise(self, ex_id: str) -> Optional[GuideExercise]:
         for e in self.exercises:
@@ -42,6 +48,12 @@ class ActivityGuide:
 
     def get_exercise_ids(self) -> List[str]:
         return [e.id for e in self.exercises]
+
+    def get_family_exercises(self, family_name: str) -> List[GuideExercise]:
+        return [e for e in self.exercises if (e.familia or "").lower() == family_name.lower()]
+
+    def get_exercises_by_role(self, role: str) -> List[GuideExercise]:
+        return [e for e in self.exercises if (e.rol_familia or "").lower() == role.lower()]
 
 
 def extract_c_function_names(c_code: str) -> List[str]:
@@ -89,6 +101,10 @@ def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None) ->
 
         guide_tipo = data.get("tipo_entrega", data.get("build_mode", "archivos_individuales"))
         ej_tipo = item_data.get("tipo_entrega", item_data.get("build_mode", guide_tipo))
+        familia = item_data.get("familia", item_data.get("family"))
+        rol_familia = item_data.get("rol_familia", item_data.get("rol", item_data.get("role")))
+        dependencias = item_data.get("dependencias", item_data.get("requires", item_data.get("deps", [])))
+        archivos_req = item_data.get("archivos_requeridos", item_data.get("archivos_adicionales", []))
 
         if ej_yaml and ej_yaml.is_file():
             try:
@@ -100,6 +116,10 @@ def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None) ->
                 starter = starter or ej_data.get("starter_code", "")
                 solucion = solucion or ej_data.get("solucion_c", "")
                 ej_tipo = ej_data.get("tipo_entrega", ej_data.get("build_mode", ej_tipo))
+                familia = familia or ej_data.get("familia", ej_data.get("family"))
+                rol_familia = rol_familia or ej_data.get("rol_familia", ej_data.get("rol", ej_data.get("role")))
+                dependencias = dependencias or ej_data.get("dependencias", ej_data.get("requires", ej_data.get("deps", [])))
+                archivos_req = archivos_req or ej_data.get("archivos_requeridos", ej_data.get("archivos_adicionales", []))
             except Exception:
                 pass
 
@@ -129,16 +149,22 @@ def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None) ->
                 exercise_dir=ex_dir,
                 functions=list(dict.fromkeys(funcs)),
                 tipo_entrega=ej_tipo,
+                familia=familia,
+                rol_familia=rol_familia,
+                dependencias=dependencias if isinstance(dependencias, list) else [dependencias],
+                archivos_requeridos=archivos_req if isinstance(archivos_req, list) else [archivos_req],
             )
         )
 
     guide_tipo_global = data.get("tipo_entrega", data.get("build_mode", "archivos_individuales"))
+    familias_global = data.get("familias", list(dict.fromkeys(e.familia for e in exercises if e.familia)))
     return ActivityGuide(
         nombre=nombre,
         guide_dir=gdir,
         exercises=exercises,
         raw_meta=data,
         tipo_entrega=guide_tipo_global,
+        familias=familias_global,
     )
 
 

@@ -603,9 +603,10 @@ def cmd_config_add_entrega(
     ripley_strict: Optional[bool] = typer.Option(None, "--ripley-strict/--no-ripley-strict", help="Modo estricto de Ripley para esta entrega."),
     disabled_rules: Optional[str] = typer.Option(None, "--disabled-rules", help="Códigos de reglas Ripley a omitir separados por coma (ej. '0x0009h,0x0004h')."),
     memory_mb: Optional[int] = typer.Option(None, "--memory-mb", help="Límite estricto de RAM en MB para el sandbox."),
+    mode: Optional[str] = typer.Option(None, "--mode", "-m", help="Modo de construcción para esta entrega ('archivos_individuales' o 'makefile')."),
     workspace: Path = typer.Option(Path("."), "--workspace", "-w", help="Directorio raíz del workspace."),
 ) -> None:
-    """Agrega o actualiza una entrega en dredd.yaml con su patrón ZIP, guía Deckard y chequeos específicos."""
+    """Agrega o actualiza una entrega en dredd.yaml con su patrón ZIP, guía Deckard, modo y chequeos específicos."""
     from dredd.core.config import load_dredd_config, MappingRule
 
     cfg = load_dredd_config(workspace)
@@ -628,6 +629,7 @@ def cmd_config_add_entrega(
         guia=guia,
         titulo=titulo,
         checks=checks_dict if checks_dict else None,
+        mode=mode,
     )
     cfg.add_or_update_mapping(rule)
     cfg.save()
@@ -635,6 +637,7 @@ def cmd_config_add_entrega(
     console.print(f"\n[bold green]✓ Entrega '{entrega}' guardada exitosamente en dredd.yaml:[/bold green]")
     console.print(f"  • [bold]Patrón ZIP:[/bold] [yellow]{zip_pattern}[/yellow]")
     console.print(f"  • [bold]Guía Deckard:[/bold] [cyan]{guia or 'No asignada'}[/cyan]")
+    console.print(f"  • [bold]Modo de entrega:[/bold] [magenta]{mode or 'Auto / Heredado'}[/magenta]")
     console.print(f"  • [bold]Título:[/bold] {titulo or '—'}")
     if checks_dict:
         console.print(f"  • [bold]Overrides de chequeo:[/bold] {checks_dict}\n")

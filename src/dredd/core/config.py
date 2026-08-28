@@ -120,6 +120,7 @@ class MappingRule:
     descripcion: str = ""
     plantilla: Optional[str] = None
     checks: Optional[Dict[str, Any]] = None
+    mode: Optional[str] = None  # "archivos_individuales", "makefile", "libreria", "proyecto", "auto"
 
     def matches_zip(self, zip_filename: str) -> bool:
         """Verifica si el nombre de archivo ZIP coincide con el patrón configurado."""
@@ -148,6 +149,7 @@ class WorkspaceSettings:
     guias_dir: str = "guias"
     plantillas_dir: str = "plantillas"
     default_org: str = "INGCOM-UNRN-P1"
+    default_mode: str = "auto"
 
 
 @dataclass
@@ -157,6 +159,40 @@ class DreddConfig:
     mapeos: List[MappingRule] = field(default_factory=list)
     raw_data: Dict[str, Any] = field(default_factory=dict)
     config_path: Optional[Path] = None
+
+    def get_delivery_mode(
+        self,
+        activity_slug: Optional[str] = None,
+        guide_mode: Optional[str] = None,
+        target_path: Optional[Path] = None,
+        cli_override: Optional[str] = None,
+    ) -> str:
+        """Determina el modo de entrega efectivo ('archivos_individuales' o 'makefile')
+        aplicando la jerarquía de prioridad:
+        1. CLI override explícito (si se proporcionó)
+        2. dredd.yaml (regla de entrega puntual o global)
+        3. Deckard guía (guia.tipo_entrega)
+        4. Detección automática por presencia de Makefile
+        5. Fallback por defecto ('archivos_individuales')
+        """
+        if cli_override and cli_override.lower() not in ("auto", "none", ""):
+            return "makefile" if cli_override.lower() in ("make", "makefile", "proyecto", "libreria") else "archivos_individuales"
+
+        if activity_slug:
+            rule = self.find_mapping_for_activity(activity_slug)
+            if rule and rule.mode and rule.mode.lower() not in ("auto", "none", ""):
+                return "makefile" if rule.mode.lower() in ("make", "makefile", "proyecto", "libreria") else "archivos_individuales"
+
+        if guide_mode and guide_mode.lower() not in ("auto", "none", ""):
+            return "makefile" if guide_mode.lower() in ("make", "makefile", "proyecto", "libreria") else "archivos_individuales"
+
+        if target_path and target_path.is_dir():
+            if (target_path / "Makefile").is_file() or (target_path / "makefile").is_file():
+                return "makefile"
+            if list(target_path.glob("**/Makefile")) or list(target_path.glob("**/makefile")):
+                return "makefile"
+
+        return "archivos_individuales"
 
     def find_mapping_for_zip(self, zip_filename: str) -> Optional[MappingRule]:
         """Encuentra la primera regla de mapeo que coincida con el archivo ZIP."""
@@ -236,6 +272,8 @@ class DreddConfig:
                 "guia": m.guia or "",
                 "titulo": m.titulo or "",
             }
+            if m.mode:
+                item["mode"] = m.mode
             if m.descripcion:
                 item["descripcion"] = m.descripcion
             if m.checks:
@@ -251,6 +289,7 @@ class DreddConfig:
                 "guias_dir": self.workspace.guias_dir,
                 "plantillas_dir": self.workspace.plantillas_dir,
                 "default_org": self.workspace.default_org,
+                "default_mode": self.workspace.default_mode,
             },
             "checks": self.checks.to_dict(),
             "mapeos": mapeos_list,
@@ -276,6 +315,7 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
                         guias_dir=ws_raw.get("guias_dir", "guias"),
                         plantillas_dir=ws_raw.get("plantillas_dir", "plantillas"),
                         default_org=ws_raw.get("default_org", "INGCOM-UNRN-P1"),
+                        default_mode=ws_raw.get("default_mode", "auto"),
                     )
 
                     checks_cfg = ToolChecksConfig.from_dict(raw.get("checks", {}))
@@ -292,6 +332,7 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
                                     descripcion=m.get("descripcion", ""),
                                     plantilla=m.get("plantilla"),
                                     checks=m.get("checks"),
+                                    mode=m.get("mode") or m.get("tipo_entrega"),
                                 )
                             )
                     return DreddConfig(
