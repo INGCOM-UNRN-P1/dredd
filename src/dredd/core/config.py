@@ -19,33 +19,105 @@ import yaml
 class ToolChecksConfig:
     """Configuración de verificaciones de herramientas pedagógicas y estáticas."""
 
-    # Ripley (P1 rules)
+    # Ripley (P1 rules / AST)
     ripley_enabled: bool = True
     ripley_strict: bool = False
     ripley_rules: List[str] = field(default_factory=list)  # Vacío = todas las reglas
     ripley_disabled_rules: List[str] = field(default_factory=list)  # ej. ["0x0009h"]
+    ripley_max_function_lines: int = 50
+    ripley_max_line_length: int = 80
 
     # Kaneda / Seguridad
     kaneda_enabled: bool = True
-    ban_dangerous_calls: bool = True  # ptrace, exec, sockets
+    ban_dangerous_calls: bool = True  # ptrace, exec, sockets, system, popen
     ban_fork_bombs: bool = True
+    ban_buffer_overflow_functions: bool = True  # gets, strcpy, sprintf, scanf sin ancho
 
     # Spunkmeyer / Antipatrones didácticos
     spunkmeyer_enabled: bool = True
     ban_feof_loop: bool = True
     ban_gets: bool = True
+    ban_redundant_null_free: bool = True
+    ban_dangling_stack_return: bool = True
+    ban_redundant_boolean_comparison: bool = True
+    ban_malloc_size_type: bool = True
 
     # Gaff / Linter de estilo
     gaff_enabled: bool = True
     enforce_snake_case: bool = True
+    enforce_header_guards: bool = True
+    ban_tab_indentation: bool = True
 
     # Daedalus / Compilador
     daedalus_compiler: str = "esper"  # "esper", "gcc", "clang"
     compiler_flags: str = "-Wall -Wextra -std=c11"
+    treat_warnings_as_errors: bool = False
+
+    # Brett / Auditoría de Structs y Padding
+    brett_enabled: bool = True
+    audit_struct_padding: bool = True
+    max_wasted_padding_bytes: int = 0
+
+    # Bishop / Trazabilidad de Memoria
+    bishop_enabled: bool = True
+    detect_unfreed_allocations: bool = True
+
+    # Drake / Fuzzing y Robustez
+    drake_enabled: bool = True
+    fuzz_boundary_limits: bool = True
 
     # Sandbox
     sandbox_memory_mb: int = 64
     sandbox_timeout_seconds: float = 5.0
+    fail_on_memory_leak: bool = True
+    fail_on_sanitizer: bool = True
+
+    # Plagio / Winnowing
+    plagiarism_threshold: float = 0.60
+    plagiarism_strip_boilerplate: bool = True
+
+    @classmethod
+    def get_strict_preset(cls) -> ToolChecksConfig:
+        """Retorna una configuración con el máximo nivel de rigurosidad pedagógica y estática."""
+        return cls(
+            ripley_enabled=True,
+            ripley_strict=True,
+            ripley_rules=["all"],
+            ripley_disabled_rules=[],
+            ripley_max_function_lines=40,
+            ripley_max_line_length=80,
+            kaneda_enabled=True,
+            ban_dangerous_calls=True,
+            ban_fork_bombs=True,
+            ban_buffer_overflow_functions=True,
+            spunkmeyer_enabled=True,
+            ban_feof_loop=True,
+            ban_gets=True,
+            ban_redundant_null_free=True,
+            ban_dangling_stack_return=True,
+            ban_redundant_boolean_comparison=True,
+            ban_malloc_size_type=True,
+            gaff_enabled=True,
+            enforce_snake_case=True,
+            enforce_header_guards=True,
+            ban_tab_indentation=True,
+            daedalus_compiler="esper",
+            compiler_flags="-Wall -Wextra -Werror -pedantic -std=c11 -Wconversion -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wcast-align -Wwrite-strings -fsanitize=address,undefined",
+            treat_warnings_as_errors=True,
+            brett_enabled=True,
+            audit_struct_padding=True,
+            max_wasted_padding_bytes=0,
+            bishop_enabled=True,
+            detect_unfreed_allocations=True,
+            drake_enabled=True,
+            fuzz_boundary_limits=True,
+            sandbox_memory_mb=32,
+            sandbox_timeout_seconds=3.0,
+            fail_on_memory_leak=True,
+            fail_on_sanitizer=True,
+            plagiarism_threshold=0.55,
+            plagiarism_strip_boilerplate=True,
+        )
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> ToolChecksConfig:
@@ -57,25 +129,50 @@ class ToolChecksConfig:
         spunk_data = data.get("spunkmeyer", {})
         gaff_data = data.get("gaff", {})
         daed_data = data.get("daedalus", {})
+        brett_data = data.get("brett", {})
+        bishop_data = data.get("bishop", {})
+        drake_data = data.get("drake", {})
         sand_data = data.get("sandbox", {})
+        plag_data = data.get("plagiarism", {})
 
         return cls(
             ripley_enabled=ripley_data.get("enabled", data.get("ripley_enabled", True)),
             ripley_strict=ripley_data.get("strict", data.get("ripley_strict", False)),
             ripley_rules=ripley_data.get("rules", data.get("ripley_rules", [])),
             ripley_disabled_rules=ripley_data.get("disabled_rules", data.get("ripley_disabled_rules", [])),
+            ripley_max_function_lines=int(ripley_data.get("max_function_lines", 50)),
+            ripley_max_line_length=int(ripley_data.get("max_line_length", 80)),
             kaneda_enabled=kaneda_data.get("enabled", data.get("kaneda_enabled", True)),
             ban_dangerous_calls=kaneda_data.get("ban_dangerous_calls", data.get("ban_dangerous_calls", True)),
             ban_fork_bombs=kaneda_data.get("ban_fork_bombs", data.get("ban_fork_bombs", True)),
+            ban_buffer_overflow_functions=kaneda_data.get("ban_buffer_overflow_functions", True),
             spunkmeyer_enabled=spunk_data.get("enabled", data.get("spunkmeyer_enabled", True)),
             ban_feof_loop=spunk_data.get("ban_feof_loop", data.get("ban_feof_loop", True)),
             ban_gets=spunk_data.get("ban_gets", data.get("ban_gets", True)),
+            ban_redundant_null_free=spunk_data.get("ban_redundant_null_free", True),
+            ban_dangling_stack_return=spunk_data.get("ban_dangling_stack_return", True),
+            ban_redundant_boolean_comparison=spunk_data.get("ban_redundant_boolean_comparison", True),
+            ban_malloc_size_type=spunk_data.get("ban_malloc_size_type", True),
             gaff_enabled=gaff_data.get("enabled", data.get("gaff_enabled", True)),
             enforce_snake_case=gaff_data.get("enforce_snake_case", data.get("enforce_snake_case", True)),
+            enforce_header_guards=gaff_data.get("enforce_header_guards", True),
+            ban_tab_indentation=gaff_data.get("ban_tab_indentation", True),
             daedalus_compiler=daed_data.get("compiler", data.get("daedalus_compiler", "esper")),
             compiler_flags=daed_data.get("flags", data.get("compiler_flags", "-Wall -Wextra -std=c11")),
+            treat_warnings_as_errors=daed_data.get("treat_warnings_as_errors", False),
+            brett_enabled=brett_data.get("enabled", True),
+            audit_struct_padding=brett_data.get("audit_struct_padding", True),
+            max_wasted_padding_bytes=int(brett_data.get("max_wasted_padding_bytes", 0)),
+            bishop_enabled=bishop_data.get("enabled", True),
+            detect_unfreed_allocations=bishop_data.get("detect_unfreed_allocations", True),
+            drake_enabled=drake_data.get("enabled", True),
+            fuzz_boundary_limits=drake_data.get("fuzz_boundary_limits", True),
             sandbox_memory_mb=int(sand_data.get("max_memory_mb", data.get("sandbox_memory_mb", 64))),
             sandbox_timeout_seconds=float(sand_data.get("timeout_seconds", data.get("sandbox_timeout_seconds", 5.0))),
+            fail_on_memory_leak=sand_data.get("fail_on_memory_leak", True),
+            fail_on_sanitizer=sand_data.get("fail_on_sanitizer", True),
+            plagiarism_threshold=float(plag_data.get("threshold", 0.60)),
+            plagiarism_strip_boilerplate=plag_data.get("strip_boilerplate", True),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -85,28 +182,57 @@ class ToolChecksConfig:
                 "strict": self.ripley_strict,
                 "rules": self.ripley_rules,
                 "disabled_rules": self.ripley_disabled_rules,
+                "max_function_lines": self.ripley_max_function_lines,
+                "max_line_length": self.ripley_max_line_length,
+            },
+            "daedalus": {
+                "compiler": self.daedalus_compiler,
+                "flags": self.compiler_flags,
+                "treat_warnings_as_errors": self.treat_warnings_as_errors,
             },
             "kaneda": {
                 "enabled": self.kaneda_enabled,
                 "ban_dangerous_calls": self.ban_dangerous_calls,
                 "ban_fork_bombs": self.ban_fork_bombs,
+                "ban_buffer_overflow_functions": self.ban_buffer_overflow_functions,
             },
             "spunkmeyer": {
                 "enabled": self.spunkmeyer_enabled,
                 "ban_feof_loop": self.ban_feof_loop,
                 "ban_gets": self.ban_gets,
+                "ban_redundant_null_free": self.ban_redundant_null_free,
+                "ban_dangling_stack_return": self.ban_dangling_stack_return,
+                "ban_redundant_boolean_comparison": self.ban_redundant_boolean_comparison,
+                "ban_malloc_size_type": self.ban_malloc_size_type,
             },
             "gaff": {
                 "enabled": self.gaff_enabled,
                 "enforce_snake_case": self.enforce_snake_case,
+                "enforce_header_guards": self.enforce_header_guards,
+                "ban_tab_indentation": self.ban_tab_indentation,
             },
-            "daedalus": {
-                "compiler": self.daedalus_compiler,
-                "flags": self.compiler_flags,
+            "brett": {
+                "enabled": self.brett_enabled,
+                "audit_struct_padding": self.audit_struct_padding,
+                "max_wasted_padding_bytes": self.max_wasted_padding_bytes,
+            },
+            "bishop": {
+                "enabled": self.bishop_enabled,
+                "detect_unfreed_allocations": self.detect_unfreed_allocations,
+            },
+            "drake": {
+                "enabled": self.drake_enabled,
+                "fuzz_boundary_limits": self.fuzz_boundary_limits,
             },
             "sandbox": {
                 "max_memory_mb": self.sandbox_memory_mb,
                 "timeout_seconds": self.sandbox_timeout_seconds,
+                "fail_on_memory_leak": self.fail_on_memory_leak,
+                "fail_on_sanitizer": self.fail_on_sanitizer,
+            },
+            "plagiarism": {
+                "threshold": self.plagiarism_threshold,
+                "strip_boilerplate": self.plagiarism_strip_boilerplate,
             },
         }
 

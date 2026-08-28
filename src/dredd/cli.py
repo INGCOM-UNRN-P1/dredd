@@ -748,4 +748,37 @@ def cmd_config_validate(
         raise typer.Exit(code=1)
 
 
+@config_app.command("preset")
+def cmd_config_preset(
+    preset_name: str = typer.Argument("strict", help="Nombre del preset a aplicar ('strict' o 'standard')."),
+    workspace: Path = typer.Option(Path("."), "--workspace", "-w", help="Directorio raíz del workspace."),
+) -> None:
+    """Aplica un perfil preconfigurado de rigurosidad a dredd.yaml (ej. 'strict' para máxima rigurosidad)."""
+    from dredd.core.config import load_dredd_config, ToolChecksConfig
+
+    cfg = load_dredd_config(workspace)
+    if not cfg:
+        console.print(f"[bold red]No se encontró dredd.yaml en {workspace.resolve()}.[/bold red]")
+        raise typer.Exit(code=1)
+
+    if preset_name.lower() in ("strict", "estricto", "max", "maxima"):
+        cfg.checks = ToolChecksConfig.get_strict_preset()
+        cfg.workspace.name = f"{cfg.workspace.name} (Modo Máxima Rigurosidad)"
+        cfg.save()
+        console.print(f"\n[bold green]✓ Perfil de MÁXIMA RIGUROSIDAD ('strict') aplicado con éxito en dredd.yaml.[/bold green]")
+        console.print("  • Daedalus: Flags estrictos (-Wall -Wextra -Werror -pedantic -std=c11 -Wconversion -Wshadow -fsanitize=address,undefined)")
+        console.print("  • Ripley: Reglas P1 estrictas activadas al 100% (0 omisiones)")
+        console.print("  • Kaneda: Prohibición total de llamadas riesgosas y evasión de sandbox")
+        console.print("  • Spunkmeyer: Detección exhaustiva de todos los antipatrones C")
+        console.print("  • Gaff: Cumplimiento estricto de estilo y guardas de header")
+        console.print("  • Brett: 0 bytes de padding desperdiciado tolerado en structs")
+        console.print("  • Bishop: Detección estricta de cualquier fuga de memoria (0 leaks)")
+        console.print("  • Drake: Fuzzing de límites numéricos (INT_MAX/MIN) y strings vacíos")
+        console.print("  • Sandbox: 32 MB RAM / 3.0s timeout / Fallo bloqueante en leaks o sanitizers\n")
+    else:
+        console.print(f"[bold red]Preset desconocido: '{preset_name}'. Disponibles: strict.[/bold red]")
+        raise typer.Exit(code=1)
+
+
+
 

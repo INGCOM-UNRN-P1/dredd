@@ -364,6 +364,26 @@ def test_delivery_mode_override_hierarchy_and_families(tmp_path: Path):
     assert len(guide.get_exercises_by_role("uso")) == 1
 
 
+def test_cli_config_preset_strict(tmp_path: Path):
+    from dredd.core.config import load_dredd_config
+
+    init_res = runner.invoke(app, ["init", str(tmp_path)])
+    assert init_res.exit_code == 0
+
+    preset_res = runner.invoke(app, ["config", "preset", "strict", "--workspace", str(tmp_path)])
+    assert preset_res.exit_code == 0
+    assert "MÁXIMA RIGUROSIDAD" in preset_res.stdout
+
+    cfg = load_dredd_config(tmp_path)
+    assert cfg is not None
+    assert cfg.checks.ripley_strict is True
+    assert cfg.checks.treat_warnings_as_errors is True
+    assert "-Werror" in cfg.checks.compiler_flags
+    assert cfg.checks.sandbox_memory_mb == 32
+    assert cfg.checks.fail_on_memory_leak is True
+
+
+
 
 
 
