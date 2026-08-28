@@ -30,8 +30,17 @@ def find_existing_revision_folders(student_dir: Path) -> List[tuple[int, Path]]:
     return sorted(revs, key=lambda x: x[0])
 
 
+ALLMAN_CLANG_STYLE = (
+    "{BasedOnStyle: LLVM, BreakBeforeBraces: Allman, "
+    "AllowShortIfStatementsOnASingleLine: false, AllowShortBlocksOnASingleLine: false, "
+    "AllowShortLoopsOnASingleLine: false, AllowShortFunctionsOnASingleLine: None, "
+    "IndentWidth: 4, TabWidth: 4, UseTab: Never, IndentCaseLabels: true, "
+    "ColumnLimit: 80, SpaceBeforeParens: ControlStatements, PointerAlignment: Right}"
+)
+
+
 def format_c_sources_in_place(target_dir: Path) -> None:
-    """Aplica autoformato (clang-format) a archivos C/H dentro de target_dir para revisión manual docente."""
+    """Aplica autoformato con estilo Allman (clang-format) a archivos C/H dentro de target_dir para revisión manual docente."""
     if not target_dir.is_dir():
         return
 
@@ -41,7 +50,7 @@ def format_c_sources_in_place(target_dir: Path) -> None:
 
     try:
         subprocess.run(
-            ["clang-format", "-i", "-fallback-style=LLVM", *[str(f) for f in c_files]],
+            ["clang-format", "-i", f"-style={ALLMAN_CLANG_STYLE}", *[str(f) for f in c_files]],
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
