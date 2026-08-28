@@ -74,4 +74,4 @@ def test_moodle_ingestor_process_zip(tmp_path: Path):
 
     assert len(results) == 1
     assert (tmp_path / info.activity_slug / "alvarez-juan_101" / "r1" / "main.c").exists()
-    assert (tmp_path / info.activity_slug / "alvarez-juan_101" / "r1_f" / "main.c").exists()
+    assert (tmp_path / info.activity_slug / "alvarez-juan_101" / "r1f" / "main.c").exists()

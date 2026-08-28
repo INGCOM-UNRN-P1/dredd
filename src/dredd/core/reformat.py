@@ -103,7 +103,7 @@ def reformat_submission_to_rn_f(
         version_num = 1
 
     target_r_dir = student_dir / f"r{version_num}"
-    target_rf_dir = student_dir / f"r{version_num}_f"
+    target_rf_dir = student_dir / f"r{version_num}f"
     target_rni_dir = student_dir / f"r{version_num}i"
     target_r_dir.mkdir(parents=True, exist_ok=True)
     target_rni_dir.mkdir(parents=True, exist_ok=True)
@@ -139,12 +139,12 @@ def reformat_submission_to_rn_f(
             except Exception:
                 pass
 
-    # 4. Generar la copia formateada rN_f para revisión manual
+    # 4. Generar la copia formateada rNf para revisión manual docente
     generate_rn_f_copy(target_r_dir, target_rf_dir)
 
-    # 5. Asegurar que cualquier otra revisión rN existente también tenga su rN_f sincronizado
+    # 5. Asegurar que cualquier otra revisión rN existente también tenga su rNf sincronizado
     for num, r_folder in existing_r:
-        rf_folder = student_dir / f"r{num}_f"
+        rf_folder = student_dir / f"r{num}f"
         if not rf_folder.exists():
             generate_rn_f_copy(r_folder, rf_folder)
 

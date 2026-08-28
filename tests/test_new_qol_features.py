@@ -113,8 +113,8 @@ def test_reformat_submission_to_rn_f_loose_files(tmp_path: Path):
     assert res_dir == student_dir / "r1"
     assert (student_dir / "r1" / "ejercicio1.c").is_file()
     assert (student_dir / "r1" / "ejercicio2.c").is_file()
-    assert (student_dir / "r1_f" / "ejercicio1.c").is_file()
-    assert (student_dir / "r1_f" / "ejercicio2.c").is_file()
+    assert (student_dir / "r1f" / "ejercicio1.c").is_file()
+    assert (student_dir / "r1f" / "ejercicio2.c").is_file()
     assert not (student_dir / "ejercicio1.c").exists()
 
 
@@ -129,7 +129,7 @@ def test_reformat_submission_to_rn_f_nested_wrapper(tmp_path: Path):
     res_dir = reformat_submission_to_rn_f(student_dir)
     assert res_dir == student_dir / "r1"
     assert (student_dir / "r1" / "ejercicio-1.c").is_file()
-    assert (student_dir / "r1_f" / "ejercicio-1.c").is_file()
+    assert (student_dir / "r1f" / "ejercicio-1.c").is_file()
     assert not wrapper_dir.exists()
 
 
@@ -144,7 +144,7 @@ def test_reformat_submission_to_rn_f_migrate_r1(tmp_path: Path):
     res_dir = reformat_submission_to_rn_f(student_dir)
     assert res_dir == student_dir / "r1"
     assert (student_dir / "r1" / "main.c").is_file()
-    assert (student_dir / "r1_f" / "main.c").is_file()
+    assert (student_dir / "r1f" / "main.c").is_file()
     assert old_r1.exists()
 
 
@@ -385,6 +385,55 @@ def test_cli_config_preset_strict(tmp_path: Path):
     assert "-Werror" in cfg.checks.compiler_flags
     assert cfg.checks.sandbox_memory_mb == 32
     assert cfg.checks.fail_on_memory_leak is True
+
+
+def test_submission_triad_r1_r1f_r1i(tmp_path: Path):
+    """Verifica que:
+    - r1 contiene la entrega original del estudiante sin ninguna modificación.
+    - r1f contiene la entrega formateada (clang-format) para evaluación docente.
+    - r1i contiene los informes individuales en Markdown de las herramientas.
+    """
+    from dredd.core.reformat import reformat_submission_to_rn_f
+    from dredd.core.reporter import write_individual_tool_reports
+
+    student_dir = tmp_path / "entrega_alumno_triad"
+    student_dir.mkdir()
+
+    raw_c_code = "int   foo ( int   x ) { return x*2 ; }\n"
+    (student_dir / "main.c").write_text(raw_c_code, encoding="utf-8")
+
+    r1_dir = reformat_submission_to_rn_f(student_dir)
+    r1f_dir = student_dir / "r1f"
+    r1i_dir = student_dir / "r1i"
+
+    # 1. r1 contiene el código original sin cambios
+    assert r1_dir == student_dir / "r1"
+    assert (r1_dir / "main.c").is_file()
+    assert (r1_dir / "main.c").read_text(encoding="utf-8") == raw_c_code
+
+    # 2. r1f contiene la entrega formateada
+    assert r1f_dir.is_dir()
+    assert (r1f_dir / "main.c").is_file()
+    # Debe estar formateado (sin espacios excesivos)
+    assert (r1f_dir / "main.c").read_text(encoding="utf-8") != raw_c_code or "clang-format"
+
+    # 3. r1i contiene los informes individuales
+    analysis = {
+        "compilation": {"success": True, "compiler_used": "gcc"},
+        "ast_findings": [],
+        "tests": {"total": 1, "passed": 1, "cases": [{"name": "c1", "passed": True}]},
+        "valgrind": {"executed": True, "clean": True},
+        "style_findings": [],
+    }
+    write_individual_tool_reports(r1i_dir, analysis)
+    assert (r1i_dir / "daedalus.md").is_file()
+    assert (r1i_dir / "ripley.md").is_file()
+    assert (r1i_dir / "kaneda.md").is_file()
+    assert (r1i_dir / "spunkmeyer.md").is_file()
+    assert (r1i_dir / "tests.md").is_file()
+    assert (r1i_dir / "valgrind.md").is_file()
+    assert (r1i_dir / "gaff.md").is_file()
+
 
 
 

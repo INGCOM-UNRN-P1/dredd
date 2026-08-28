@@ -260,8 +260,8 @@ class MoodleIngestor:
                         for src in sources:
                             (rev_dir / src.filename).write_bytes(src.content)
 
-                        # Generar copia formateada rN_f para revisión manual docente
-                        rf_dir = student_dir / f"r{next_version}_f"
+                        # Generar copia formateada rNf para revisión manual docente
+                        rf_dir = student_dir / f"r{next_version}f"
                         generate_rn_f_copy(rev_dir, rf_dir)
 
                         db.add_revision(
