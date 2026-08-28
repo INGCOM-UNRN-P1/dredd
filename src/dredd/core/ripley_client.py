@@ -132,19 +132,34 @@ def discover_and_run_local_testcases(target_path: Path) -> List[Dict[str, Any]]:
     return results
 
 
-def run_ripley_analysis(target_path: Path, guide: Optional[Any] = None) -> Dict[str, Any]:
-    """Ejecuta el análisis técnico sobre la entrega del estudiante usando Ripley y la guía de Deckard."""
+def run_ripley_analysis(
+    target_path: Path,
+    guide: Optional[Any] = None,
+    activity_slug: Optional[str] = None,
+    workspace_dir: Optional[Path] = None,
+    checks_override: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Ejecuta el análisis técnico sobre la entrega del estudiante usando Ripley, Dredd y la guía de Deckard."""
+    from dredd.core.config import load_dredd_config, ToolChecksConfig
+
+    if checks_override:
+        checks = checks_override
+    else:
+        cfg = load_dredd_config(workspace_dir or target_path)
+        checks = cfg.get_effective_checks(activity_slug) if cfg else ToolChecksConfig()
+
     # 1. Intentar importación directa si Ripley está en el entorno Python
     res_dict = None
-    try:
-        from ripley.core.engine import analyze_target
-        result = analyze_target(target_path)
-        res_dict = result.to_dict()
-    except ImportError:
-        pass
+    if checks.ripley_enabled:
+        try:
+            from ripley.core.engine import analyze_target
+            result = analyze_target(target_path)
+            res_dict = result.to_dict()
+        except ImportError:
+            pass
 
     # 2. Intentar ejecución vía comando CLI de ripley si no se obtuvo por import
-    if res_dict is None:
+    if res_dict is None and checks.ripley_enabled:
         ripley_bin = shutil.which("ripley") or shutil.which("ripley-check")
         if ripley_bin:
             try:
@@ -173,7 +188,6 @@ def run_ripley_analysis(target_path: Path, guide: Optional[Any] = None) -> Dict[
         for c_file in c_files:
             ast_findings.extend(audit_c_file(c_file))
 
-        # Soporte para proyectos modulares de ejercicios (conan mode)
         makefile_results = evaluate_makefile_exercises(target_path)
         if makefile_results:
             all_passed = all(m.clean_ok and m.test_ok for m in makefile_results)
@@ -206,7 +220,7 @@ def run_ripley_analysis(target_path: Path, guide: Optional[Any] = None) -> Dict[
                 "metrics": {},
             }
         else:
-            comp_res = compile_c_sources(c_files, output_bin=None)
+            comp_res = compile_c_sources(c_files, output_bin=None, compiler=checks.daedalus_compiler)
             res_dict = {
                 "version": "2.0.0",
                 "compilation": {
@@ -220,34 +234,51 @@ def run_ripley_analysis(target_path: Path, guide: Optional[Any] = None) -> Dict[
                 "metrics": {"c_files_count": len(c_files)},
             }
 
-    # 4. Auditoría de seguridad y evasión de sandbox en todos los archivos C
-    c_files = sorted([
-        f for f in target_path.glob("**/*.c")
-        if not any(part.startswith(".") for part in f.parts)
-    ])
-    sec_findings = []
-    for c_f in c_files:
-        try:
-            code_txt = c_f.read_text(encoding="utf-8", errors="replace")
-            for sf in audit_sandbox_evasion(code_txt, c_f.name):
-                sec_findings.append({
-                    "rule_code": sf.rule_code,
-                    "rule_name": f"[SEGURIDAD] {sf.title}",
-                    "severity": sf.severity,
-                    "message": sf.message,
-                    "suggestion": "Eliminá llamadas a funciones del sistema o intentos de evasión de sandbox.",
-                    "file": c_f.name,
-                    "line": sf.line,
-                    "code_snippet": sf.code_snippet,
-                })
-        except Exception:
-            pass
+    # 4. Auditoría de seguridad y evasión de sandbox (Kaneda)
+    if checks.kaneda_enabled:
+        c_files = sorted([
+            f for f in target_path.glob("**/*.c")
+            if not any(part.startswith(".") for part in f.parts)
+        ])
+        sec_findings = []
+        for c_f in c_files:
+            try:
+                code_txt = c_f.read_text(encoding="utf-8", errors="replace")
+                for sf in audit_sandbox_evasion(code_txt, c_f.name):
+                    sec_findings.append({
+                        "rule_code": sf.rule_code,
+                        "rule_name": f"[SEGURIDAD] {sf.title}",
+                        "severity": sf.severity,
+                        "message": sf.message,
+                        "suggestion": "Eliminá llamadas a funciones del sistema o intentos de evasión de sandbox.",
+                        "file": c_f.name,
+                        "line": sf.line,
+                        "code_snippet": sf.code_snippet,
+                    })
+            except Exception:
+                pass
 
-    if sec_findings:
-        res_dict.setdefault("ast_findings", []).extend(sec_findings)
-        res_dict.setdefault("metrics", {})["security_violations"] = len(sec_findings)
+        if sec_findings:
+            res_dict.setdefault("ast_findings", []).extend(sec_findings)
+            res_dict.setdefault("metrics", {})["security_violations"] = len(sec_findings)
 
-    # 5. Ejecutar casos de prueba (de la guía Deckard o descubiertos localmente)
+    # 5. Filtrar hallazgos de Ripley según reglas activas/deshabilitadas
+    if "ast_findings" in res_dict:
+        raw_findings = res_dict["ast_findings"]
+        filtered = []
+        for f in raw_findings:
+            rc = (f.get("rule_code") or f.get("rule_id") or "").lower()
+            # Si la regla está deshabilitada explícitamente, ignorarla
+            if any(rc == dis.lower() for dis in checks.ripley_disabled_rules):
+                continue
+            # Si hay lista blanca de reglas de Ripley y no es un hallazgo de seguridad
+            if checks.ripley_rules and not rc.startswith("sec") and not f.get("rule_name", "").startswith("[SEGURIDAD]"):
+                if not any(rc == en.lower() for en in checks.ripley_rules):
+                    continue
+            filtered.append(f)
+        res_dict["ast_findings"] = filtered
+
+    # 6. Ejecutar casos de prueba bajo sandbox configurado
     all_tests = list(res_dict.get("tests", {}).get("cases", []))
     if guide and getattr(guide, "exercises", None):
         guide_tests = evaluate_guide_testcases(target_path, guide)

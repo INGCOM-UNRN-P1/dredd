@@ -177,3 +177,76 @@ def test_cmd_init_and_config_mapping(tmp_path: Path):
     assert len(guide.exercises) == 2
 
 
+def test_dredd_config_cli_workflow(tmp_path: Path):
+    ws_dir = tmp_path / "workspace_test"
+    # 1. Init
+    res_init = runner.invoke(app, ["init", str(ws_dir), "--name", "Algoritmos 1"])
+    assert res_init.exit_code == 0
+
+    # 2. Config Show
+    res_show = runner.invoke(app, ["config", "show", "--workspace", str(ws_dir)])
+    assert res_show.exit_code == 0
+    assert "Algoritmos 1" in res_show.stdout
+    assert "Políticas Globales de Chequeo" in res_show.stdout
+    assert "entrega_1" in res_show.stdout
+
+    # 3. Add Delivery
+    res_add = runner.invoke(
+        app,
+        [
+            "config",
+            "add-entrega",
+            "entrega_4",
+            "--zip",
+            "*entrega*4*.zip",
+            "--guia",
+            "guias/entrega_4/guia.yaml",
+            "--titulo",
+            "Práctica 4 - TDAs y Memoria",
+            "--ripley-strict",
+            "--disabled-rules",
+            "0x0009h",
+            "--memory-mb",
+            "128",
+            "--workspace",
+            str(ws_dir),
+        ],
+    )
+    assert res_add.exit_code == 0
+    assert "entrega_4" in res_add.stdout
+
+    # 4. Set Check (Global & Per-delivery)
+    res_set_g = runner.invoke(app, ["config", "set-check", "ripley", "strict=true", "--workspace", str(ws_dir)])
+    assert res_set_g.exit_code == 0
+
+    res_set_e = runner.invoke(
+        app,
+        ["config", "set-check", "sandbox", "max_memory_mb=256", "--entrega", "entrega_4", "--workspace", str(ws_dir)],
+    )
+    assert res_set_e.exit_code == 0
+
+    # Verify via load_dredd_config
+    from dredd.core.config import load_dredd_config
+
+    cfg = load_dredd_config(ws_dir)
+    assert cfg is not None
+    assert cfg.checks.ripley_strict is True
+
+    eff4 = cfg.get_effective_checks("entrega_4")
+    assert eff4.sandbox_memory_mb == 256
+    assert "0x0009h" in eff4.ripley_disabled_rules
+
+    # 5. Config Validate
+    res_val = runner.invoke(app, ["config", "validate", "--workspace", str(ws_dir)])
+    assert res_val.exit_code == 0
+    assert "Validación de Espacio de Trabajo Dredd" in res_val.stdout
+
+    # 6. Remove Delivery
+    res_rm = runner.invoke(app, ["config", "remove-entrega", "entrega_4", "--workspace", str(ws_dir)])
+    assert res_rm.exit_code == 0
+    assert "eliminada correctamente" in res_rm.stdout
+    cfg_after = load_dredd_config(ws_dir)
+    assert cfg_after.find_mapping_for_activity("entrega_4") is None
+
+
+

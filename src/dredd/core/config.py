@@ -1,13 +1,114 @@
-"""Gestión de configuración declarativa del espacio de trabajo de Dredd (dredd.yaml)."""
+"""Gestión de configuración declarativa del espacio de trabajo de Dredd (dredd.yaml).
+
+Soporta configuración centralizada de espacio de trabajo, mapeos ZIP-a-guía
+y políticas de verificación por herramienta (Ripley, Kaneda, Spunkmeyer, Gaff, Daedalus, Sandbox)
+a nivel global o específico por entrega.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 import fnmatch
 from pathlib import Path
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import yaml
+
+
+@dataclass
+class ToolChecksConfig:
+    """Configuración de verificaciones de herramientas pedagógicas y estáticas."""
+
+    # Ripley (P1 rules)
+    ripley_enabled: bool = True
+    ripley_strict: bool = False
+    ripley_rules: List[str] = field(default_factory=list)  # Vacío = todas las reglas
+    ripley_disabled_rules: List[str] = field(default_factory=list)  # ej. ["0x0009h"]
+
+    # Kaneda / Seguridad
+    kaneda_enabled: bool = True
+    ban_dangerous_calls: bool = True  # ptrace, exec, sockets
+    ban_fork_bombs: bool = True
+
+    # Spunkmeyer / Antipatrones didácticos
+    spunkmeyer_enabled: bool = True
+    ban_feof_loop: bool = True
+    ban_gets: bool = True
+
+    # Gaff / Linter de estilo
+    gaff_enabled: bool = True
+    enforce_snake_case: bool = True
+
+    # Daedalus / Compilador
+    daedalus_compiler: str = "esper"  # "esper", "gcc", "clang"
+    compiler_flags: str = "-Wall -Wextra -std=c11"
+
+    # Sandbox
+    sandbox_memory_mb: int = 64
+    sandbox_timeout_seconds: float = 5.0
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> ToolChecksConfig:
+        if not data:
+            return cls()
+
+        ripley_data = data.get("ripley", {})
+        kaneda_data = data.get("kaneda", {})
+        spunk_data = data.get("spunkmeyer", {})
+        gaff_data = data.get("gaff", {})
+        daed_data = data.get("daedalus", {})
+        sand_data = data.get("sandbox", {})
+
+        return cls(
+            ripley_enabled=ripley_data.get("enabled", data.get("ripley_enabled", True)),
+            ripley_strict=ripley_data.get("strict", data.get("ripley_strict", False)),
+            ripley_rules=ripley_data.get("rules", data.get("ripley_rules", [])),
+            ripley_disabled_rules=ripley_data.get("disabled_rules", data.get("ripley_disabled_rules", [])),
+            kaneda_enabled=kaneda_data.get("enabled", data.get("kaneda_enabled", True)),
+            ban_dangerous_calls=kaneda_data.get("ban_dangerous_calls", data.get("ban_dangerous_calls", True)),
+            ban_fork_bombs=kaneda_data.get("ban_fork_bombs", data.get("ban_fork_bombs", True)),
+            spunkmeyer_enabled=spunk_data.get("enabled", data.get("spunkmeyer_enabled", True)),
+            ban_feof_loop=spunk_data.get("ban_feof_loop", data.get("ban_feof_loop", True)),
+            ban_gets=spunk_data.get("ban_gets", data.get("ban_gets", True)),
+            gaff_enabled=gaff_data.get("enabled", data.get("gaff_enabled", True)),
+            enforce_snake_case=gaff_data.get("enforce_snake_case", data.get("enforce_snake_case", True)),
+            daedalus_compiler=daed_data.get("compiler", data.get("daedalus_compiler", "esper")),
+            compiler_flags=daed_data.get("flags", data.get("compiler_flags", "-Wall -Wextra -std=c11")),
+            sandbox_memory_mb=int(sand_data.get("max_memory_mb", data.get("sandbox_memory_mb", 64))),
+            sandbox_timeout_seconds=float(sand_data.get("timeout_seconds", data.get("sandbox_timeout_seconds", 5.0))),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "ripley": {
+                "enabled": self.ripley_enabled,
+                "strict": self.ripley_strict,
+                "rules": self.ripley_rules,
+                "disabled_rules": self.ripley_disabled_rules,
+            },
+            "kaneda": {
+                "enabled": self.kaneda_enabled,
+                "ban_dangerous_calls": self.ban_dangerous_calls,
+                "ban_fork_bombs": self.ban_fork_bombs,
+            },
+            "spunkmeyer": {
+                "enabled": self.spunkmeyer_enabled,
+                "ban_feof_loop": self.ban_feof_loop,
+                "ban_gets": self.ban_gets,
+            },
+            "gaff": {
+                "enabled": self.gaff_enabled,
+                "enforce_snake_case": self.enforce_snake_case,
+            },
+            "daedalus": {
+                "compiler": self.daedalus_compiler,
+                "flags": self.compiler_flags,
+            },
+            "sandbox": {
+                "max_memory_mb": self.sandbox_memory_mb,
+                "timeout_seconds": self.sandbox_timeout_seconds,
+            },
+        }
 
 
 @dataclass
@@ -18,13 +119,13 @@ class MappingRule:
     titulo: str = ""
     descripcion: str = ""
     plantilla: Optional[str] = None
+    checks: Optional[Dict[str, Any]] = None
 
     def matches_zip(self, zip_filename: str) -> bool:
         """Verifica si el nombre de archivo ZIP coincide con el patrón configurado."""
         name = Path(zip_filename).name
         if fnmatch.fnmatch(name.lower(), self.zip_pattern.lower()):
             return True
-        # Coincidencia exacta o por substring
         pat_clean = self.zip_pattern.replace("*", "").strip()
         return bool(pat_clean and pat_clean.lower() in name.lower())
 
@@ -32,7 +133,11 @@ class MappingRule:
         """Verifica si el slug de actividad coincide con esta regla."""
         act_clean = activity_slug.strip("/\\").lower()
         ent_clean = self.entrega.strip("/\\").lower()
-        return act_clean == ent_clean or act_clean == ent_clean.replace("_", "-") or act_clean == ent_clean.replace("-", "_")
+        return (
+            act_clean == ent_clean
+            or act_clean == ent_clean.replace("_", "-")
+            or act_clean == ent_clean.replace("-", "_")
+        )
 
 
 @dataclass
@@ -48,6 +153,7 @@ class WorkspaceSettings:
 @dataclass
 class DreddConfig:
     workspace: WorkspaceSettings = field(default_factory=WorkspaceSettings)
+    checks: ToolChecksConfig = field(default_factory=ToolChecksConfig)
     mapeos: List[MappingRule] = field(default_factory=list)
     raw_data: Dict[str, Any] = field(default_factory=dict)
     config_path: Optional[Path] = None
@@ -67,7 +173,7 @@ class DreddConfig:
         return None
 
     def get_guide_path(self, activity_slug: str, base_dir: Optional[Path] = None) -> Optional[Path]:
-        """Retorna la ruta absoluta o resuelta hacia la guía de Deckard mapeada."""
+        """Retorna la ruta resuelta hacia la guía de Deckard mapeada."""
         base = base_dir or (self.config_path.parent if self.config_path else Path.cwd())
         rule = self.find_mapping_for_activity(activity_slug)
         if rule and rule.guia:
@@ -79,8 +185,63 @@ class DreddConfig:
                 return cand_alt
         return None
 
+    def get_effective_checks(self, activity_slug: Optional[str] = None) -> ToolChecksConfig:
+        """Calcula los chequeos efectivos fusionando las políticas globales con los overrides de la entrega."""
+        global_dict = self.checks.to_dict()
+        if not activity_slug:
+            return self.checks
+
+        rule = self.find_mapping_for_activity(activity_slug)
+        if not rule or not rule.checks:
+            return self.checks
+
+        merged = dict(global_dict)
+        for tool, tool_overrides in rule.checks.items():
+            if isinstance(tool_overrides, dict) and tool in merged:
+                merged[tool].update(tool_overrides)
+            else:
+                merged[tool] = tool_overrides
+
+        return ToolChecksConfig.from_dict(merged)
+
+    def add_or_update_mapping(self, rule: MappingRule) -> None:
+        """Agrega o reemplaza una regla de mapeo según el slug de entrega."""
+        for idx, existing in enumerate(self.mapeos):
+            if existing.matches_activity(rule.entrega):
+                self.mapeos[idx] = rule
+                return
+        self.mapeos.append(rule)
+
+    def remove_mapping(self, activity_slug: str) -> bool:
+        """Elimina una regla de mapeo según el slug de entrega."""
+        initial_len = len(self.mapeos)
+        self.mapeos = [m for m in self.mapeos if not m.matches_activity(activity_slug)]
+        return len(self.mapeos) < initial_len
+
+    def save(self, target_file: Optional[Path] = None) -> Path:
+        """Guarda la configuración actual a archivo YAML."""
+        out_path = target_file or self.config_path or (Path.cwd() / "dredd.yaml")
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(self.to_yaml(), encoding="utf-8")
+        self.config_path = out_path
+        return out_path
+
     def to_yaml(self) -> str:
-        """Serializa la configuración a formato YAML legible."""
+        """Serializa la configuración a formato YAML estructurado."""
+        mapeos_list = []
+        for m in self.mapeos:
+            item: Dict[str, Any] = {
+                "zip_pattern": m.zip_pattern,
+                "entrega": m.entrega,
+                "guia": m.guia or "",
+                "titulo": m.titulo or "",
+            }
+            if m.descripcion:
+                item["descripcion"] = m.descripcion
+            if m.checks:
+                item["checks"] = m.checks
+            mapeos_list.append(item)
+
         data = {
             "version": "1.0",
             "workspace": {
@@ -91,15 +252,8 @@ class DreddConfig:
                 "plantillas_dir": self.workspace.plantillas_dir,
                 "default_org": self.workspace.default_org,
             },
-            "mapeos": [
-                {
-                    "zip_pattern": m.zip_pattern,
-                    "entrega": m.entrega,
-                    "guia": m.guia or "",
-                    "titulo": m.titulo or "",
-                }
-                for m in self.mapeos
-            ],
+            "checks": self.checks.to_dict(),
+            "mapeos": mapeos_list,
         }
         return yaml.dump(data, sort_keys=False, allow_unicode=True)
 
@@ -107,13 +261,6 @@ class DreddConfig:
 def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[DreddConfig]:
     """Carga dredd.yaml desde el workspace o directorios superiores."""
     start = Path(workspace_dir).resolve() if workspace_dir else Path.cwd().resolve()
-    
-    candidates = [
-        start / "dredd.yaml",
-        start / "dredd.yml",
-        start / ".dredd.yaml",
-        start / ".dredd.yml",
-    ]
 
     for p in [start] + list(start.parents)[:3]:
         for name in ("dredd.yaml", "dredd.yml", ".dredd.yaml"):
@@ -130,6 +277,9 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
                         plantillas_dir=ws_raw.get("plantillas_dir", "plantillas"),
                         default_org=ws_raw.get("default_org", "INGCOM-UNRN-P1"),
                     )
+
+                    checks_cfg = ToolChecksConfig.from_dict(raw.get("checks", {}))
+
                     mapeos = []
                     for m in raw.get("mapeos", []):
                         if isinstance(m, dict):
@@ -141,10 +291,12 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
                                     titulo=m.get("titulo", ""),
                                     descripcion=m.get("descripcion", ""),
                                     plantilla=m.get("plantilla"),
+                                    checks=m.get("checks"),
                                 )
                             )
                     return DreddConfig(
                         workspace=ws,
+                        checks=checks_cfg,
                         mapeos=mapeos,
                         raw_data=raw,
                         config_path=cand,
@@ -168,13 +320,11 @@ def init_workspace(
     root = Path(target_dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
 
-    # Crear directorios estructurados
     (root / zips_dir).mkdir(parents=True, exist_ok=True)
     (root / submissions_dir).mkdir(parents=True, exist_ok=True)
     (root / guias_dir).mkdir(parents=True, exist_ok=True)
     (root / plantillas_dir).mkdir(parents=True, exist_ok=True)
 
-    # Plantillas de informe por defecto
     header_path = root / plantillas_dir / "header.md"
     if not header_path.exists():
         header_path.write_text("# Informe de Corrección Docente · Cátedra Programación 1\n\n", encoding="utf-8")
@@ -186,7 +336,6 @@ def init_workspace(
             encoding="utf-8",
         )
 
-    # Guía de ejemplo para la entrega 1
     sample_guia_dir = root / guias_dir / "entrega_1"
     sample_guia_dir.mkdir(parents=True, exist_ok=True)
     sample_guia_yaml = sample_guia_dir / "guia.yaml"
@@ -216,12 +365,27 @@ ejercicios:
                 guias_dir=guias_dir,
                 plantillas_dir=plantillas_dir,
             ),
+            checks=ToolChecksConfig(
+                ripley_enabled=True,
+                ripley_strict=False,
+                ripley_disabled_rules=[],
+                kaneda_enabled=True,
+                spunkmeyer_enabled=True,
+                gaff_enabled=True,
+                daedalus_compiler="esper",
+                sandbox_memory_mb=64,
+                sandbox_timeout_seconds=5.0,
+            ),
             mapeos=[
                 MappingRule(
                     zip_pattern="*entrega*1*.zip",
                     entrega="entrega_1",
                     guia=f"{guias_dir}/entrega_1/guia.yaml",
                     titulo="Práctica 1 - Sintaxis y Control",
+                    checks={
+                        "ripley": {"strict": False},
+                        "sandbox": {"max_memory_mb": 64},
+                    },
                 ),
                 MappingRule(
                     zip_pattern="*entrega*2*.zip",
@@ -241,3 +405,43 @@ ejercicios:
         config_file.write_text(cfg.to_yaml(), encoding="utf-8")
 
     return root, config_file
+
+
+def validate_workspace(workspace_dir: Optional[Path | str] = None) -> List[Tuple[str, str, str]]:
+    """Valida la integridad del espacio de trabajo y reporta problemas (nivel, componente, mensaje)."""
+    ws = Path(workspace_dir).resolve() if workspace_dir else Path.cwd().resolve()
+    cfg = load_dredd_config(ws)
+    issues: List[Tuple[str, str, str]] = []
+
+    if not cfg or not cfg.config_path:
+        issues.append(("ERROR", "dredd.yaml", f"No se encontró dredd.yaml en {ws} ni en directorios padres."))
+        return issues
+
+    issues.append(("OK", "dredd.yaml", f"Archivo de configuración cargado desde {cfg.config_path}."))
+
+    # Validar directorios del workspace
+    for attr, dir_name in [
+        ("Zips", cfg.workspace.zips_dir),
+        ("Entregas", cfg.workspace.submissions_dir),
+        ("Guías", cfg.workspace.guias_dir),
+        ("Plantillas", cfg.workspace.plantillas_dir),
+    ]:
+        dp = ws / dir_name
+        if not dp.exists():
+            issues.append(("WARN", f"directorio:{attr}", f"El directorio '{dir_name}' no existe en {ws}."))
+        else:
+            issues.append(("OK", f"directorio:{attr}", f"Directorio '{dir_name}' presente."))
+
+    # Validar mapeos y guías asociadas
+    if not cfg.mapeos:
+        issues.append(("WARN", "mapeos", "No hay entregas mapeadas en dredd.yaml."))
+    else:
+        for m in cfg.mapeos:
+            if m.guia:
+                gp = cfg.get_guide_path(m.entrega, ws)
+                if not gp or not gp.exists():
+                    issues.append(("WARN", f"guia:{m.entrega}", f"La guía '{m.guia}' para '{m.entrega}' no existe."))
+                else:
+                    issues.append(("OK", f"guia:{m.entrega}", f"Guía vinculada para '{m.entrega}': {m.guia}"))
+
+    return issues
