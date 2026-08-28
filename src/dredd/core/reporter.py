@@ -81,18 +81,119 @@ def find_student_report(workspace_dir: Path, exercise: str, student: str) -> Opt
     return None
 
 
-def generate_student_report(
+def write_individual_tool_reports(
+    rni_dir: Path,
+    analysis: Dict[str, Any],
+    metadata: Optional[RepoMetadata] = None,
+    guide: Optional[Any] = None,
+) -> Dict[str, Path]:
+    """Genera los informes individuales en Markdown para cada herramienta en el directorio rNi."""
+    rni_dir.mkdir(parents=True, exist_ok=True)
+    generated: Dict[str, Path] = {}
+
+    # 1. Daedalus (Compilación)
+    comp = analysis.get("compilation", {})
+    compiler_used = comp.get("compiler_used", "gcc").upper()
+    comp_lines = [f"## Compilación — Daedalus ({compiler_used})"]
+    if comp.get("success"):
+        comp_lines.append("\n✓ **Estado:** Compilación exitosa sin errores bloqueantes.")
+    else:
+        comp_lines.append("\n❌ **Estado:** Falló la compilación.")
+        if comp.get("human_summary"):
+            comp_lines.append(f"\n**Diagnóstico general:** {comp['human_summary']}")
+        diags = comp.get("translated_diagnostics", [])
+        if diags:
+            comp_lines.append("\n| Archivo:Línea | Severidad | Mensaje Traducido | Sugerencia |")
+            comp_lines.append("| :--- | :---: | :--- | :--- |")
+            for d in diags:
+                sug = d.get("suggestion", "")
+                comp_lines.append(f"| `{d.get('file')}:{d.get('line')}` | **{d.get('severity')}** | {d.get('translated_message')} | {sug} |")
+        elif comp.get("raw_stderr"):
+            comp_lines.append("\n```text")
+            comp_lines.append(comp["raw_stderr"][:1200])
+            comp_lines.append("```")
+    daed_path = rni_dir / "daedalus.md"
+    daed_path.write_text("\n".join(comp_lines) + "\n", encoding="utf-8")
+    generated["daedalus"] = daed_path
+
+    # 2. Ripley (Reglas P1 / AST)
+    ast_findings = [f for f in analysis.get("ast_findings", []) if not (f.get("rule_code") or "").startswith("SEC_") and not f.get("rule_name", "").startswith("[SEGURIDAD]")]
+    rip_lines = ["## Observaciones de Calidad y Reglas P1 — Ripley"]
+    if ast_findings:
+        rip_lines.append(f"\nSe detectaron **{len(ast_findings)}** observación(es) en el código C:\n")
+        rip_lines.append("| Regla | Ubicación | Severidad | Observación | Sugerencia |")
+        rip_lines.append("| :--- | :--- | :---: | :--- | :--- |")
+        for f in ast_findings:
+            rc = f.get("rule_code") or f.get("rule_id") or "P1"
+            sug = f.get("suggestion", "")
+            rip_lines.append(f"| `{rc}` | `{f.get('file')}:{f.get('line')}` | {f.get('severity')} | {f.get('message')} | {sug} |")
+    else:
+        rip_lines.append("\n✓ **Estado:** No se detectaron violaciones a las reglas de cátedra.")
+    rip_path = rni_dir / "ripley.md"
+    rip_path.write_text("\n".join(rip_lines) + "\n", encoding="utf-8")
+    generated["ripley"] = rip_path
+
+    # 3. Kaneda (Seguridad)
+    sec_findings = [f for f in analysis.get("ast_findings", []) if (f.get("rule_code") or "").startswith("SEC_") or f.get("rule_name", "").startswith("[SEGURIDAD]")]
+    kan_lines = ["## Auditoría de Seguridad — Kaneda"]
+    if sec_findings:
+        kan_lines.append(f"\n⚠️ **Alerta:** Se detectaron **{len(sec_findings)}** llamadas o patrones de riesgo de seguridad:\n")
+        kan_lines.append("| Regla | Archivo:Línea | Severidad | Detalle | Sugerencia |")
+        kan_lines.append("| :--- | :--- | :---: | :--- | :--- |")
+        for sf in sec_findings:
+            kan_lines.append(f"| `{sf.get('rule_code')}` | `{sf.get('file')}:{sf.get('line')}` | **{sf.get('severity')}** | {sf.get('message')} | {sf.get('suggestion')} |")
+    else:
+        kan_lines.append("\n✓ **Estado:** Código libre de llamadas del sistema restringidas o intentos de evasión de sandbox.")
+    kan_path = rni_dir / "kaneda.md"
+    kan_path.write_text("\n".join(kan_lines) + "\n", encoding="utf-8")
+    generated["kaneda"] = kan_path
+
+    # 4. Spunkmeyer (Antipatrones Didácticos)
+    spk_findings = [f for f in ast_findings if "antipattern" in str(f.get("rule_id", "")).lower() or "feof" in str(f.get("message", "")).lower()]
+    spk_lines = ["## Antipatrones Didácticos — Spunkmeyer"]
+    if spk_findings:
+        spk_lines.append(f"\nSe detectaron **{len(spk_findings)}** antipatrones didácticos:\n")
+        for sf in spk_findings:
+            spk_lines.append(f"- **`{sf.get('rule_id')}`** en `{sf.get('file')}:{sf.get('line')}`: {sf.get('message')}")
+    else:
+        spk_lines.append("\n✓ **Estado:** No se detectaron antipatrones pedagógicos conocidos.")
+    spk_path = rni_dir / "spunkmeyer.md"
+    spk_path.write_text("\n".join(spk_lines) + "\n", encoding="utf-8")
+    generated["spunkmeyer"] = spk_path
+
+    # 5. Tests (Casos de prueba y Sandbox)
+    tests = analysis.get("tests", {})
+    test_lines = ["## Pruebas Funcionales y Chequeo de Memoria — Sandbox"]
+    if tests.get("total", 0) > 0:
+        test_lines.append(f"\n**Resultado general:** {tests.get('passed', 0)} / {tests.get('total', 0)} pruebas aprobadas.\n")
+        test_lines.append("| Caso | Estado | Fuga de Memoria | Detalle |")
+        test_lines.append("| :--- | :---: | :---: | :--- |")
+        for tc in tests.get("cases", []):
+            st = "✓ PASÓ" if tc.get("passed") else "✗ FALLÓ"
+            leak = "SI (Leak)" if tc.get("memory_leak") else "NO"
+            err = tc.get("sanitizer_error", "") or ""
+            err_summary = err.splitlines()[0] if err else ("Timeout" if tc.get("timed_out") else "OK")
+            test_lines.append(f"| `{tc.get('name')}` | **{st}** | {leak} | {err_summary} |")
+    else:
+        test_lines.append("\n*No se ejecutaron casos de prueba automatizados para esta entrega.*")
+    test_path = rni_dir / "tests.md"
+    test_path.write_text("\n".join(test_lines) + "\n", encoding="utf-8")
+    generated["tests"] = test_path
+
+    return generated
+
+
+def generate_consolidated_report_from_rni(
+    rni_dir: Path,
     exercise: str,
     student: str,
-    repo_path: Path,
     metadata: RepoMetadata,
-    analysis: Dict[str, Any],
     template_dir: Path,
     output_file: Path,
     revision: Optional[str] = None,
     guide: Optional[Any] = None,
 ) -> str:
-    """Genera el informe Markdown estructurado en la carpeta de la entrega con su versión (r1, r2, etc.)."""
+    """Consolida todos los informes Markdown generados por herramientas dentro de rNi en un único informe."""
     lines = []
 
     # 1. Header template
@@ -103,6 +204,7 @@ def generate_student_report(
         rev_title = f" ({revision})" if revision else ""
         lines.append(f"# Informe de Corrección — {exercise}{rev_title}")
 
+    # 2. Metadatos de Repositorio y Guía
     lines.append("\n## Repositorio")
     lines.append(f"**branch/revision:** `{metadata.branch}` `{metadata.revision}`")
     lines.append(f"**Fecha:** {metadata.date_str}")
@@ -121,60 +223,27 @@ def generate_student_report(
         lines.append(metadata.files_list)
         lines.append("```")
 
-    lines.append("\n## Análisis de Código C")
+    lines.append("\n## Análisis de Código C e Informes de Herramientas")
 
-    # 2. Compilación
-    comp = analysis.get("compilation", {})
-    compiler_used = comp.get("compiler_used", "gcc").upper()
-    comp_header = f"Compilación ({compiler_used})" if compiler_used != "NONE" else "Compilación"
-    if comp.get("success"):
-        lines.append(f"\n### {comp_header}")
-        lines.append("✓ Compilación exitosa sin errores bloqueantes.")
-    else:
-        lines.append(f"\n### {comp_header} — [FALLÓ]")
-        if comp.get("human_summary"):
-            lines.append(f"**Diagnóstico:** {comp['human_summary']}")
-        
-        diags = comp.get("translated_diagnostics", [])
-        if diags:
-            lines.append("\n| Archivo:Línea | Severidad | Mensaje Traducido | Sugerencia |")
-            lines.append("| :--- | :---: | :--- | :--- |")
-            for d in diags:
-                sug = d.get("suggestion", "")
-                lines.append(f"| `{d.get('file')}:{d.get('line')}` | **{d.get('severity')}** | {d.get('translated_message')} | {sug} |")
-        elif comp.get("raw_stderr"):
-            lines.append("```text")
-            lines.append(comp["raw_stderr"][:1000])
-            lines.append("```")
+    # 3. Incorporar informes modulares desde rNi en orden pedagógico
+    priority_order = ["daedalus.md", "ripley.md", "tests.md", "kaneda.md", "spunkmeyer.md", "gaff.md"]
+    included_files = set()
 
-    # 3. Reglas AST y Calidad P1
-    ast_findings = analysis.get("ast_findings", [])
-    if ast_findings:
-        lines.append("\n### Observaciones de Calidad y Reglas P1")
-        lines.append("\n| Regla | Ubicación | Severidad | Observación | Sugerencia |")
-        lines.append("| :--- | :--- | :---: | :--- | :--- |")
-        for f in ast_findings:
-            sug = f.get("suggestion", "")
-            lines.append(f"| `{f.get('rule_id')}` | `{f.get('file')}:{f.get('line')}` | {f.get('severity')} | {f.get('message')} | {sug} |")
-    else:
-        lines.append("\n### Observaciones de Calidad y Reglas P1")
-        lines.append("✓ No se detectaron violaciones a las reglas de estilo de cátedra.")
+    if rni_dir.is_dir():
+        # Incluir herramientas en orden prioritario
+        for p_name in priority_order:
+            p_file = rni_dir / p_name
+            if p_file.is_file():
+                lines.append("\n" + p_file.read_text(encoding="utf-8", errors="replace").strip())
+                included_files.add(p_file.name)
 
-    # 4. Pruebas Funcionales y Memoria
-    tests = analysis.get("tests", {})
-    if tests.get("total", 0) > 0:
-        lines.append("\n### Pruebas Funcionales y Chequeo de Memoria")
-        lines.append(f"**Resultado:** {tests.get('passed', 0)} / {tests.get('total', 0)} pruebas aprobadas.\n")
-        lines.append("| Caso | Estado | Fuga de Memoria | Detalle |")
-        lines.append("| :--- | :---: | :---: | :--- |")
-        for tc in tests.get("cases", []):
-            st = "✓ PASÓ" if tc.get("passed") else "✗ FALLÓ"
-            leak = "SI (Leak)" if tc.get("memory_leak") else "NO"
-            err = tc.get("sanitizer_error", "") or ""
-            err_summary = err.splitlines()[0] if err else ("Timeout" if tc.get("timed_out") else "OK")
-            lines.append(f"| `{tc.get('name')}` | **{st}** | {leak} | {err_summary} |")
+        # Incluir cualquier otra herramienta arbitraria presente en rNi/*.md
+        for other_md in sorted(rni_dir.glob("*.md")):
+            if other_md.name not in included_files and other_md.name not in ("informe.md", "informe_consolidado.md"):
+                lines.append(f"\n## Herramienta: {other_md.stem.title()}")
+                lines.append(other_md.read_text(encoding="utf-8", errors="replace").strip())
 
-    # 5. Footer template
+    # 4. Footer template
     footer_file = template_dir / "footer.md"
     if footer_file.is_file():
         lines.append("\n" + footer_file.read_text(encoding="utf-8", errors="replace").strip())
@@ -183,6 +252,41 @@ def generate_student_report(
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text(report_content, encoding="utf-8")
     return report_content
+
+
+def generate_student_report(
+    exercise: str,
+    student: str,
+    repo_path: Path,
+    metadata: RepoMetadata,
+    analysis: Dict[str, Any],
+    template_dir: Path,
+    output_file: Path,
+    revision: Optional[str] = None,
+    guide: Optional[Any] = None,
+) -> str:
+    """Genera los informes individuales por herramienta en rNi y el informe consolidado final."""
+    student_dir = repo_path.parent if re.match(r"^r\d+(?:_f)?$", repo_path.name, re.IGNORECASE) else repo_path
+    rev_str = revision or resolve_submission_revision(repo_path, student)
+    m_num = re.search(r"\d+", rev_str)
+    rev_num = m_num.group(0) if m_num else "1"
+
+    rni_dir = student_dir / f"r{rev_num}i"
+
+    # 1. Escribir informes individuales de cada herramienta en rNi/
+    write_individual_tool_reports(rni_dir, analysis, metadata=metadata, guide=guide)
+
+    # 2. Generar informe consolidado a partir de rNi/
+    return generate_consolidated_report_from_rni(
+        rni_dir=rni_dir,
+        exercise=exercise,
+        student=student,
+        metadata=metadata,
+        template_dir=template_dir,
+        output_file=output_file,
+        revision=rev_str,
+        guide=guide,
+    )
 
 
 def generate_personalized_feedback_markdown(

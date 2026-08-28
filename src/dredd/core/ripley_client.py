@@ -11,7 +11,11 @@ from dredd.core.compiler import compile_c_sources
 from dredd.core.sandbox import execute_sandboxed, audit_sandbox_evasion
 
 
-def evaluate_guide_testcases(target_path: Path, guide: Any) -> List[Dict[str, Any]]:
+def evaluate_guide_testcases(
+    target_path: Path,
+    guide: Any,
+    tipo_entrega: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """Ejecuta los casos de test .in / .out de la guía de Deckard contra los binarios del estudiante en sandbox."""
     if not guide or not getattr(guide, "exercises", None):
         return []
@@ -23,12 +27,87 @@ def evaluate_guide_testcases(target_path: Path, guide: Any) -> List[Dict[str, An
     if not c_files:
         return []
 
+    mode = tipo_entrega or getattr(guide, "tipo_entrega", "archivos_individuales")
     results = []
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmp_d:
         tmp_dir = Path(tmp_d)
 
+        # 1. Modo Makefile (o proyecto con Makefile)
+        if mode in ("makefile", "proyecto") and ((target_path / "Makefile").is_file() or (target_path / "makefile").is_file()):
+            from dredd.core.compiler import compile_with_make
+            comp_res = compile_with_make(target_path)
+            if comp_res.success and comp_res.output_bin:
+                bin_file = comp_res.output_bin
+                for ex in guide.exercises:
+                    if not ex.test_cases:
+                        continue
+                    for tc in ex.test_cases:
+                        retcode, stdout, stderr, timed_out = execute_sandboxed(
+                            cmd=[str(bin_file)],
+                            input_data=tc.get("entrada", ""),
+                            timeout=5.0,
+                            max_memory_mb=64,
+                            workspace=target_path,
+                        )
+                        expected = tc.get("salida", "").strip()
+                        actual = stdout.strip()
+                        passed = (retcode == 0) and (actual == expected or not expected) and not timed_out
+                        err_msg = stderr.strip() if retcode != 0 else (
+                            f"Salida esperada:\n{expected}\nObtenida:\n{actual}" if not passed else ""
+                        )
+                        results.append({
+                            "name": f"{ex.id} / {tc['nombre']}",
+                            "passed": passed,
+                            "memory_leak": False,
+                            "sanitizer_error": err_msg,
+                            "timed_out": timed_out,
+                        })
+                return results
+
+        # 2. Modo Proyecto o Librería multi-archivo (compilar todos los .c juntos)
+        if mode in ("proyecto", "libreria"):
+            bin_file = tmp_dir / "app_project"
+            comp_res = compile_c_sources(c_files, output_bin=bin_file)
+            for ex in guide.exercises:
+                if not ex.test_cases:
+                    continue
+                if not comp_res.success:
+                    err_summary = comp_res.raw_stderr.strip()[:300]
+                    for tc in ex.test_cases:
+                        results.append({
+                            "name": f"{ex.id} / {tc['nombre']}",
+                            "passed": False,
+                            "memory_leak": False,
+                            "sanitizer_error": f"Error de compilación de proyecto: {err_summary}",
+                        })
+                    continue
+
+                for tc in ex.test_cases:
+                    retcode, stdout, stderr, timed_out = execute_sandboxed(
+                        cmd=[str(bin_file)],
+                        input_data=tc.get("entrada", ""),
+                        timeout=5.0,
+                        max_memory_mb=64,
+                        workspace=target_path,
+                    )
+                    expected = tc.get("salida", "").strip()
+                    actual = stdout.strip()
+                    passed = (retcode == 0) and (actual == expected or not expected) and not timed_out
+                    err_msg = stderr.strip() if retcode != 0 else (
+                        f"Salida esperada:\n{expected}\nObtenida:\n{actual}" if not passed else ""
+                    )
+                    results.append({
+                        "name": f"{ex.id} / {tc['nombre']}",
+                        "passed": passed,
+                        "memory_leak": False,
+                        "sanitizer_error": err_msg,
+                        "timed_out": timed_out,
+                    })
+            return results
+
+        # 3. Modo estándar: archivos individuales
         for ex in guide.exercises:
             if not ex.test_cases:
                 continue
@@ -138,6 +217,7 @@ def run_ripley_analysis(
     activity_slug: Optional[str] = None,
     workspace_dir: Optional[Path] = None,
     checks_override: Optional[Any] = None,
+    tipo_entrega: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Ejecuta el análisis técnico sobre la entrega del estudiante usando Ripley, Dredd y la guía de Deckard."""
     from dredd.core.config import load_dredd_config, ToolChecksConfig
@@ -281,7 +361,7 @@ def run_ripley_analysis(
     # 6. Ejecutar casos de prueba bajo sandbox configurado
     all_tests = list(res_dict.get("tests", {}).get("cases", []))
     if guide and getattr(guide, "exercises", None):
-        guide_tests = evaluate_guide_testcases(target_path, guide)
+        guide_tests = evaluate_guide_testcases(target_path, guide, tipo_entrega=tipo_entrega)
         if guide_tests:
             all_tests.extend(guide_tests)
     else:

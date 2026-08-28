@@ -65,11 +65,27 @@ def cmd_eval(
     org: str = typer.Option("INGCOM-UNRN-P1", "--org", "-o", help="Organización de GitHub."),
     all_students: bool = typer.Option(False, "--all", "-a", help="Evaluar todos los estudiantes presentes en el workspace."),
     template_dir: Path = typer.Option(Path("informe"), "--template-dir", "-t", help="Directorio con header.md y footer.md."),
+    tipo_entrega: Optional[str] = typer.Option(
+        None,
+        "--tipo-entrega",
+        "--build-mode",
+        "-m",
+        help="Tipo de entrega / modo de construcción ('archivos_individuales' vs 'makefile' vs 'proyecto' / 'libreria'). Hace override a lo indicado por Deckard.",
+    ),
 ) -> None:
     """Clona/actualiza el repositorio o evalúa entregas locales, ejecuta el análisis con Ripley y genera el informe Markdown."""
     workspace_dir = Path.cwd()
     exercise_slug, submissions_dir = resolve_submissions_dir(workspace_dir, exercise)
     guide = load_activity_guide(submissions_dir, exercise_slug, workspace_dir)
+
+    # Determinar modo de construcción efectivo con precedencia: CLI override > Guía Deckard > Default
+    effective_tipo = tipo_entrega or getattr(guide, "tipo_entrega", None) or "archivos_individuales"
+    if effective_tipo in ("individual", "archivos", "archivos_individuales"):
+        effective_tipo = "archivos_individuales"
+    elif effective_tipo in ("make", "makefile"):
+        effective_tipo = "makefile"
+    elif effective_tipo in ("proyecto", "project", "libreria", "lib"):
+        effective_tipo = "proyecto"
 
     target_students = []
     if student:
@@ -91,7 +107,9 @@ def cmd_eval(
         return
 
     if guide and guide.exercises:
-        console.print(f"[bold green]✓ Guía Deckard conectada ('{guide.nombre}'): {len(guide.exercises)} ejercicio(s) ({', '.join(guide.get_exercise_ids())})[/bold green]")
+        console.print(f"[bold green]✓ Guía Deckard conectada ('{guide.nombre}'): {len(guide.exercises)} ejercicio(s) ({', '.join(guide.get_exercise_ids())}) | Modo: {effective_tipo}[/bold green]")
+    else:
+        console.print(f"[bold blue]Modo de construcción activo: {effective_tipo}[/bold blue]")
 
     table = Table(title=f"Evaluación Dredd — {exercise_slug}")
     table.add_column("Estudiante", style="cyan", justify="left")
@@ -119,6 +137,7 @@ def cmd_eval(
             guide=guide,
             activity_slug=exercise_slug,
             workspace_dir=workspace_dir,
+            tipo_entrega=effective_tipo,
         )
         rev_str = resolve_submission_revision(eval_path, s_name)
 

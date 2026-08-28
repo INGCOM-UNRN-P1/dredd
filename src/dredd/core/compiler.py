@@ -164,3 +164,62 @@ def compile_c_sources(
         raw_stderr="Ni ESPER ni GCC se encuentran disponibles en el sistema.",
         compiler_used="none",
     )
+
+
+def compile_with_make(
+    build_dir: Path,
+    target_name: Optional[str] = None,
+    output_bin: Optional[Path] = None,
+    extra_flags: Optional[List[str]] = None,
+) -> CompilationResult:
+    """Compila invocando make en build_dir para entregas basadas en Makefiles."""
+    make = shutil.which("make")
+    if not make:
+        return CompilationResult(
+            success=False,
+            raw_stderr="La herramienta 'make' no se encuentra disponible en el sistema.",
+            compiler_used="make",
+        )
+
+    makefile = build_dir / "Makefile"
+    makefile_alt = build_dir / "makefile"
+    if not makefile.is_file() and not makefile_alt.is_file():
+        return CompilationResult(
+            success=False,
+            raw_stderr=f"No se encontró un archivo Makefile en '{build_dir}'.",
+            compiler_used="make",
+        )
+
+    cmd = [make, "-C", str(build_dir)]
+    if target_name:
+        cmd.append(target_name)
+    if extra_flags:
+        cmd.extend(extra_flags)
+
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        bin_found = None
+        if output_bin and output_bin.is_file():
+            bin_found = output_bin
+        else:
+            # Buscar binarios ejecutables generados
+            import os
+            for f in build_dir.iterdir():
+                if f.is_file() and not f.name.endswith((".c", ".h", ".o", ".in", ".out", ".md", ".txt", ".yaml", ".json", ".db")):
+                    if os.access(f, os.X_OK):
+                        bin_found = f
+                        break
+
+        return CompilationResult(
+            success=(proc.returncode == 0),
+            output_bin=bin_found,
+            raw_stderr=proc.stderr,
+            translated_diagnostics=[],
+            compiler_used="make",
+        )
+    except Exception as e:
+        return CompilationResult(
+            success=False,
+            raw_stderr=f"Error durante la ejecución de make: {e}",
+            compiler_used="make",
+        )

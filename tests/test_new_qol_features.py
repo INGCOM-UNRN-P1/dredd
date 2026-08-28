@@ -110,7 +110,9 @@ def test_reformat_submission_to_rn_f_loose_files(tmp_path: Path):
     (student_dir / "ejercicio2.c").write_text("int main() { return 0; }")
 
     res_dir = reformat_submission_to_rn_f(student_dir)
-    assert res_dir == student_dir / "r1_f"
+    assert res_dir == student_dir / "r1"
+    assert (student_dir / "r1" / "ejercicio1.c").is_file()
+    assert (student_dir / "r1" / "ejercicio2.c").is_file()
     assert (student_dir / "r1_f" / "ejercicio1.c").is_file()
     assert (student_dir / "r1_f" / "ejercicio2.c").is_file()
     assert not (student_dir / "ejercicio1.c").exists()
@@ -125,7 +127,8 @@ def test_reformat_submission_to_rn_f_nested_wrapper(tmp_path: Path):
     (wrapper_dir / "ejercicio-1.c").write_text("int main() { return 0; }")
 
     res_dir = reformat_submission_to_rn_f(student_dir)
-    assert res_dir == student_dir / "r1_f"
+    assert res_dir == student_dir / "r1"
+    assert (student_dir / "r1" / "ejercicio-1.c").is_file()
     assert (student_dir / "r1_f" / "ejercicio-1.c").is_file()
     assert not wrapper_dir.exists()
 
@@ -139,9 +142,10 @@ def test_reformat_submission_to_rn_f_migrate_r1(tmp_path: Path):
     (old_r1 / "main.c").write_text("int main() { return 0; }")
 
     res_dir = reformat_submission_to_rn_f(student_dir)
-    assert res_dir == student_dir / "r1_f"
+    assert res_dir == student_dir / "r1"
+    assert (student_dir / "r1" / "main.c").is_file()
     assert (student_dir / "r1_f" / "main.c").is_file()
-    assert not old_r1.exists()
+    assert old_r1.exists()
 
 
 def test_cmd_init_and_config_mapping(tmp_path: Path):
@@ -247,6 +251,68 @@ def test_dredd_config_cli_workflow(tmp_path: Path):
     assert "eliminada correctamente" in res_rm.stdout
     cfg_after = load_dredd_config(ws_dir)
     assert cfg_after.find_mapping_for_activity("entrega_4") is None
+
+
+def test_write_individual_tool_reports_and_consolidation(tmp_path: Path):
+    from dredd.core.reporter import (
+        generate_student_report,
+        write_individual_tool_reports,
+        generate_consolidated_report_from_rni,
+    )
+    from dredd.core.git_ops import RepoMetadata
+
+    student_dir = tmp_path / "perez_juan_100"
+    r1_dir = student_dir / "r1"
+    r1_dir.mkdir(parents=True)
+    r1i_dir = student_dir / "r1i"
+
+    meta = RepoMetadata(branch="main", revision="a1b2c3d", date_str="2026-08-28", files_list="main.c")
+    analysis = {
+        "compilation": {"success": True, "compiler_used": "ESPER"},
+        "ast_findings": [
+            {"rule_code": "0x1001h", "rule_id": "0x1001h", "file": "main.c", "line": 10, "severity": "ESTILO", "message": "Falta bloque", "suggestion": "Usar llaves"},
+            {"rule_code": "SEC_EVASION", "rule_name": "[SEGURIDAD] Syscall", "file": "main.c", "line": 20, "severity": "FATAL", "message": "Uso de ptrace", "suggestion": "Eliminar"},
+        ],
+        "tests": {
+            "total": 2,
+            "passed": 2,
+            "failed": 0,
+            "cases": [{"name": "caso1", "passed": True, "memory_leak": False}],
+        },
+    }
+
+    # 1. Generar reportes modulares
+    generated = write_individual_tool_reports(r1i_dir, analysis, metadata=meta)
+    assert (r1i_dir / "daedalus.md").is_file()
+    assert (r1i_dir / "ripley.md").is_file()
+    assert (r1i_dir / "kaneda.md").is_file()
+    assert (r1i_dir / "spunkmeyer.md").is_file()
+    assert (r1i_dir / "tests.md").is_file()
+
+    # Agregar un reporte arbitrario de otra herramienta en r1i
+    (r1i_dir / "bishop.md").write_text("## Visualización de Memoria (Stack/Heap)\n\n| Variable | Dirección | Valor |\n| :--- | :--- | :--- |\n| `ptr` | `0x7ffd10` | `0x55aa` |\n")
+
+    # 2. Generar reporte consolidado a partir de r1i
+    out_report = student_dir / "perez_juan_100_r1.md"
+    content = generate_student_report(
+        exercise="tp01",
+        student="perez_juan_100",
+        repo_path=r1_dir,
+        metadata=meta,
+        analysis=analysis,
+        template_dir=tmp_path / "templates",
+        output_file=out_report,
+        revision="r1",
+    )
+
+    assert out_report.is_file()
+    assert "Daedalus" in content
+    assert "Ripley" in content
+    assert "Kaneda" in content
+    assert "Bishop" in content or "Visualización de Memoria" in content
+    assert "0x1001h" in content
+    assert "SEC_EVASION" in content
+
 
 
 

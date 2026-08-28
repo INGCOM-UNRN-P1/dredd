@@ -19,6 +19,7 @@ class GuideExercise:
     test_cases: List[Dict[str, Any]] = field(default_factory=list)
     exercise_dir: Optional[Path] = None
     functions: List[str] = field(default_factory=list)
+    tipo_entrega: str = "archivos_individuales"
 
     @property
     def display_name(self) -> str:
@@ -31,6 +32,7 @@ class ActivityGuide:
     guide_dir: Path
     exercises: List[GuideExercise] = field(default_factory=list)
     raw_meta: Dict[str, Any] = field(default_factory=dict)
+    tipo_entrega: str = "archivos_individuales"
 
     def get_exercise(self, ex_id: str) -> Optional[GuideExercise]:
         for e in self.exercises:
@@ -85,6 +87,9 @@ def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None) ->
         solucion = item_data.get("solucion_c", "")
         test_cases = []
 
+        guide_tipo = data.get("tipo_entrega", data.get("build_mode", "archivos_individuales"))
+        ej_tipo = item_data.get("tipo_entrega", item_data.get("build_mode", guide_tipo))
+
         if ej_yaml and ej_yaml.is_file():
             try:
                 ej_data = yaml.safe_load(ej_yaml.read_text(encoding="utf-8")) or {}
@@ -94,6 +99,7 @@ def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None) ->
                 tags = tags or ej_data.get("tags", [])
                 starter = starter or ej_data.get("starter_code", "")
                 solucion = solucion or ej_data.get("solucion_c", "")
+                ej_tipo = ej_data.get("tipo_entrega", ej_data.get("build_mode", ej_tipo))
             except Exception:
                 pass
 
@@ -122,14 +128,17 @@ def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None) ->
                 test_cases=test_cases,
                 exercise_dir=ex_dir,
                 functions=list(dict.fromkeys(funcs)),
+                tipo_entrega=ej_tipo,
             )
         )
 
+    guide_tipo_global = data.get("tipo_entrega", data.get("build_mode", "archivos_individuales"))
     return ActivityGuide(
         nombre=nombre,
         guide_dir=gdir,
         exercises=exercises,
         raw_meta=data,
+        tipo_entrega=guide_tipo_global,
     )
 
 
@@ -137,16 +146,26 @@ def _parse_guide_from_exercise_dirs(guide_dir: Path, exercise_dirs: List[Path]) 
     exercises: List[GuideExercise] = []
     for ed in sorted(exercise_dirs):
         ej_yaml = ed / "ejercicio.yaml"
-        data = {}
+        titulo = ed.name
+        tema = "general"
+        bloom = 1
+        tags = []
+        starter = ""
+        solucion = ""
+        ej_tipo = "archivos_individuales"
+
         if ej_yaml.is_file():
             try:
-                data = yaml.safe_load(ej_yaml.read_text(encoding="utf-8")) or {}
+                ej_data = yaml.safe_load(ej_yaml.read_text(encoding="utf-8")) or {}
+                titulo = ej_data.get("titulo", titulo)
+                tema = ej_data.get("tema", tema)
+                bloom = ej_data.get("bloom", bloom)
+                tags = ej_data.get("tags", tags)
+                starter = ej_data.get("starter_code", starter)
+                solucion = ej_data.get("solucion_c", solucion)
+                ej_tipo = ej_data.get("tipo_entrega", ej_data.get("build_mode", ej_tipo))
             except Exception:
                 pass
-
-        starter = data.get("starter_code", "")
-        solucion = data.get("solucion_c", "")
-        funcs = extract_c_function_names(starter) + extract_c_function_names(solucion)
 
         test_cases = []
         tests_dir = ed / "tests"
@@ -159,18 +178,20 @@ def _parse_guide_from_exercise_dirs(guide_dir: Path, exercise_dirs: List[Path]) 
                     "salida": f_out.read_text(encoding="utf-8", errors="replace") if f_out.is_file() else "",
                 })
 
+        funcs = extract_c_function_names(starter) + extract_c_function_names(solucion)
         exercises.append(
             GuideExercise(
-                id=data.get("id", ed.name),
-                titulo=data.get("titulo", ed.name.replace("-", " ").title()),
-                tema=data.get("tema", ""),
-                bloom=int(data.get("bloom", 1)) if str(data.get("bloom", "")).isdigit() else 1,
-                tags=data.get("tags", []),
+                id=ed.name,
+                titulo=titulo,
+                tema=tema,
+                bloom=int(bloom) if str(bloom).isdigit() else 1,
+                tags=tags,
                 starter_code=starter,
                 solucion_c=solucion,
                 test_cases=test_cases,
                 exercise_dir=ed,
                 functions=list(dict.fromkeys(funcs)),
+                tipo_entrega=ej_tipo,
             )
         )
 
@@ -178,6 +199,7 @@ def _parse_guide_from_exercise_dirs(guide_dir: Path, exercise_dirs: List[Path]) 
         nombre=guide_dir.name.replace("_", " ").title(),
         guide_dir=guide_dir,
         exercises=exercises,
+        tipo_entrega="archivos_individuales",
     )
 
 
