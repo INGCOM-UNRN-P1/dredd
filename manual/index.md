@@ -27,22 +27,143 @@ La herramienta **`dredd`** forma parte del ecosistema oficial de software de la 
 ---
 
 (manual-dredd-instalacion)=
-## 2. Instalación y Diagnóstico del Entorno
+## 2. Instalación y Verificación del Entorno
 
 ````{important}
-Asegurate de contar con el compilador GCC/Clang y las librerías del sistema instaladas antes de ejecutar `dredd`.
+Para garantizar la reproducibilidad técnica de la cátedra, asegurate de instalar las dependencias nativas del sistema operativo antes de instalar el paquete Python.
 ````
 
-Para comprobar el estado de salud de tu entorno de trabajo y las dependencias auxiliares:
+### 2.1 Requisitos Previos del Sistema
+
+Instalá los paquetes del sistema requeridos según tu distribución o entorno:
+
+````{tab-set}
+```{tab-item} Ubuntu / Debian
+sudo apt update && sudo apt install -y \
+    build-essential \
+    gcc \
+    gdb \
+    valgrind \
+    clang-format \
+    libclang-dev \
+    bubblewrap \
+    typst \
+    graphviz \
+    python3-pip \
+    python3-venv
+```
+
+```{tab-item} Arch Linux / Manjaro
+sudo pacman -S --needed \
+    base-devel \
+    gcc \
+    gdb \
+    valgrind \
+    clang \
+    bubblewrap \
+    typst \
+    graphviz \
+    python-pip \
+    uv
+```
+
+```{tab-item} Fedora / RHEL
+sudo dnf install -y \
+    gcc \
+    gcc-c++ \
+    gdb \
+    valgrind \
+    clang-tools-extra \
+    bubblewrap \
+    typst \
+    graphviz \
+    python3-pip
+```
+
+```{tab-item} macOS (Homebrew)
+brew install gcc gdb clang-format typst graphviz uv
+```
+
+```{tab-item} Windows (MSYS2 / WSL2)
+# En WSL2 (Ubuntu): utilizar los paquetes de Ubuntu/Debian arriba.
+# En MSYS2 MINGW64:
+pacman -S --needed \
+    mingw-w64-x86_64-gcc \
+    mingw-w64-x86_64-gdb \
+    mingw-w64-x86_64-clang-tools-extra
+```
+````
+
+---
+
+### 2.2 Métodos de Instalación de `dredd`
+
+Podés instalar `dredd` mediante cualquiera de los siguientes métodos estándar:
+
+````{tab-set}
+```{tab-item} uv tool (Recomendado)
+# Instalación aislada de alta velocidad con uv
+uv tool install . --editable
+
+# O instalar todo el ecosistema de herramientas de la cátedra en lote:
+source ./install_tools.sh
+```
+
+```{tab-item} pip / venv
+# Crear y activar un entorno virtual
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Instalar en modo editable para desarrollo
+pip install -e .
+```
+
+```{tab-item} pipx
+# Instalación global aislada en tu PATH
+pipx install --editable .
+```
+````
+
+---
+
+### 2.3 Autocompletado en la Shell
+
+La interfaz CLI de `dredd` cuenta con autocompletado nativo para comandos, flags y archivos. Para configurarlo permanentemente en tu shell:
 
 ````{code-block} bash
-# Comprobación de dependencias del sistema
+# Configuración automática en Bash / Zsh / Fish
+dredd --install-completion
+
+# Para cargar el autocompletado en la sesión actual de inmediato:
+source ./install_tools.sh
+````
+
+---
+
+### 2.4 Verificación del Entorno con `doctor`
+
+Toda herramienta del ecosistema cuenta con el subcomando unificado `doctor`. Ejecutalo para auditar el estado del entorno:
+
+````{code-block} bash
 dredd doctor
 ````
 
-Si se detecta la falta de alguna utilidad (como `gdb`, `valgrind`, `clang-format` o `typst`), el comando indicará el paquete exacto a instalar según tu distribución GNU/Linux o entorno MSYS2.
+#### Comprobaciones Ejecutadas por el Diagnóstico:
+- **Compilador C**: Verifica disponibilidad de `gcc` o `clang` con soporte de estándares C11 y C23.
+- **Depurador y Core Dumps**: Comprueba que `gdb` esté instalado y que `ulimit -c` permita generación de core dumps.
+- **Herramientas de Memoria**: Valida la presencia de `valgrind` y librerías `libasan`/`libubsan`.
+- **Formateo y Estilo**: Verifica el binario `clang-format` (versión 16+).
+- **Sandboxing de Kernel**: Audita permisos no privilegiados de `bwrap` (Bubblewrap namespaces).
+- **Generador de Tipografía y Documentos**: Comprueba `typst` ($\ge 0.11$) y `dot` (Graphviz).
 
----
+#### Matriz de Resolución de Problemas:
+
+| Síntoma / Alerta de `doctor` | Causa Raíz | Acción Correctiva |
+| :--- | :--- | :--- |
+| `❌ gcc / clang no encontrado` | Toolchain C faltante | Instalá `build-essential` o `base-devel`. |
+| `❌ bwrap permisos insuficientes` | User namespaces desactivados | Habilitá `sysctl kernel.unprivileged_userns_clone=1`. |
+| `❌ typst no disponible` | Motor de PDF faltante | Descargá Typst vía `cargo install typst-cli` o gestor de paquetes. |
+| `❌ gdb no responde` | GDB sin interfaz MI/Python | Reinstalá `gdb` completo desde el repositorio oficial. |
 
 (manual-dredd-comandos)=
 ## 3. Referencia Completa de Comandos CLI
