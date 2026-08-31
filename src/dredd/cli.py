@@ -895,7 +895,88 @@ def cmd_plagiarism_historical(
 ) -> None:
     """Detecta plagio cruzado inter-anual contra entregas históricas."""
     from dredd.core.plagiarism_history import comparar_plagio_historico
-    comparar_plagio_historico(dir_actual, dir_historico, umbral=umbral, console=console)
+@app.command("diff-submission")
+@app.command("diff-revision")
+def cmd_diff_submission(
+    objetivo: str = typer.Argument(..., help="Ruta al directorio de la entrega o ruta a la primera versión R1."),
+    segunda_version: Optional[str] = typer.Argument(None, help="Ruta a la segunda versión R2 o nombre de revisión (ej. 'r2')."),
+    rev1_name: Optional[str] = typer.Option(None, "--r1", help="Nombre o subcarpeta de la primera revisión."),
+    rev2_name: Optional[str] = typer.Option(None, "--r2", help="Nombre o subcarpeta de la segunda revisión."),
+    entregas_dir: Path = typer.Option(Path("entregas"), "--entregas", "-e", help="Directorio base de entregas si se pasa nombre de alumno."),
+    json_output: bool = typer.Option(False, "--json", help="Emitir reporte de diff en formato JSON."),
+    output_md: Optional[Path] = typer.Option(None, "--md", "--output-md", "-o", help="Exportar reporte de diff a archivo Markdown."),
+) -> None:
+    """Compara dos versiones sucesivas de una entrega (R1 vs R2) mostrando cambios en código y funciones (QoL 3.15)."""
+    import json
+    from rich.panel import Panel
+    from rich.syntax import Syntax
+    from dredd.core.diff_submission import (
+        comparar_revisiones_entrega,
+        generar_markdown_diff_submission,
+        resolver_carpetas_revision,
+    )
+
+    r1_arg = rev1_name or segunda_version
+    r2_arg = rev2_name
+
+    dir_r1, dir_r2, tag_r1, tag_r2 = resolver_carpetas_revision(
+        objetivo,
+        rev1_name=r1_arg,
+        rev2_name=r2_arg,
+        base_dir=entregas_dir,
+    )
+
+    diff = comparar_revisiones_entrega(dir_r1, dir_r2, label_r1=tag_r1, label_r2=tag_r2)
+
+    if output_md:
+        md_text = generar_markdown_diff_submission(diff)
+        output_md.parent.mkdir(parents=True, exist_ok=True)
+        output_md.write_text(md_text, encoding="utf-8")
+        console.print(f"[bold green]✓ Reporte de reentrega generado en:[/bold green] [cyan]{output_md}[/cyan]")
+        return
+
+    if json_output:
+        print(json.dumps(diff.to_dict(), indent=2, ensure_ascii=False))
+        return
+
+    console.print(Panel(
+        f"[bold cyan]Dredd Diff Submission[/bold cyan] — Comparativa de Reentrega\n\n"
+        f"• **Revisión 1:** [dim]{diff.origen_r1}[/dim] (`{diff.revision_1}`)\n"
+        f"• **Revisión 2:** [dim]{diff.origen_r2}[/dim] (`{diff.revision_2}`)\n"
+        f"• **Resumen:** [green]+{diff.total_agregadas}[/green] / [red]-{diff.total_eliminadas}[/red] líneas "
+        f"({diff.archivos_modificados} modif, {diff.archivos_nuevos} nuevos, {diff.archivos_eliminados} elim)",
+        title="[bold green]✓ Comparación de Versiones[/bold green]",
+        border_style="cyan",
+    ))
+
+    if diff.funciones_alteradas:
+        console.print(f"\n[bold yellow]⚡ Funciones C Afectadas:[/bold yellow] " + ", ".join(f"`{fn}()`" for fn in diff.funciones_alteradas))
+
+    tabla = Table(title=f"Archivos Comparados ({len(diff.archivos)})", border_style="cyan")
+    tabla.add_column("Archivo", style="bold white")
+    tabla.add_column("Estado", justify="center")
+    tabla.add_column("Líneas +", justify="right", style="green")
+    tabla.add_column("Líneas -", justify="right", style="red")
+
+    for a in diff.archivos:
+        estado_style = {
+            "MODIFICADO": "[yellow]MODIFICADO[/yellow]",
+            "NUEVO": "[green]NUEVO[/green]",
+            "ELIMINADO": "[red]ELIMINADO[/red]",
+            "IDENTICO": "[dim]IDÉNTICO[/dim]",
+        }.get(a.estado, a.estado)
+        tabla.add_row(a.nombre, estado_style, f"+{a.lineas_agregadas}", f"-{a.lineas_eliminadas}")
+
+    console.print(tabla)
+
+    for a in diff.archivos:
+        if a.diff_unified:
+            console.print(Panel(
+                Syntax(a.diff_unified, "diff", theme="monokai", line_numbers=True),
+                title=f"Diff: {a.nombre}",
+                border_style="dim",
+            ))
+
 
 
 
