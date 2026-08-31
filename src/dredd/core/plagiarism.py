@@ -116,6 +116,36 @@ class PlagiarismDetector:
             pass
         return fps
 
+    def extract_fingerprints_from_code(self, code: str) -> Set[int]:
+        tokens = tokenize_c_code(code)
+        return compute_winnowing_fingerprints(tokens, k=self.k, w=self.w)
+
+    def calculate_similarity(self, file_or_code_a: Path | str, file_or_code_b: Path | str) -> float:
+        """Calcula la similitud de Jaccard/Containment entre dos códigos o archivos C."""
+        if isinstance(file_or_code_a, (Path, str)) and Path(file_or_code_a).is_file():
+            code_a = Path(file_or_code_a).read_text(encoding="utf-8", errors="replace")
+        else:
+            code_a = str(file_or_code_a)
+
+        if isinstance(file_or_code_b, (Path, str)) and Path(file_or_code_b).is_file():
+            code_b = Path(file_or_code_b).read_text(encoding="utf-8", errors="replace")
+        else:
+            code_b = str(file_or_code_b)
+
+        fps_a = self.extract_fingerprints_from_code(code_a)
+        fps_b = self.extract_fingerprints_from_code(code_b)
+
+        if not fps_a or not fps_b:
+            # Fallback a comparación de tokens directamente
+            t_a = set(t[0] for t in tokenize_c_code(code_a))
+            t_b = set(t[0] for t in tokenize_c_code(code_b))
+            if not t_a or not t_b:
+                return 1.0 if code_a.strip() == code_b.strip() else 0.0
+            return len(t_a.intersection(t_b)) / len(t_a.union(t_b))
+
+        intersection = len(fps_a.intersection(fps_b))
+        return (2.0 * intersection) / (len(fps_a) + len(fps_b))
+
     def analyze_submissions(self, submissions_dir: Path, threshold: Optional[float] = None,
                             plantilla: Optional[Path] = None) -> List[SimilarityMatch]:
         if plantilla is not None and self._stripper is None:

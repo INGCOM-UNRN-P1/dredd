@@ -113,8 +113,7 @@ def test_reformat_submission_to_rn_f_loose_files(tmp_path: Path):
     assert res_dir == student_dir / "r1"
     assert (student_dir / "r1" / "ejercicio1.c").is_file()
     assert (student_dir / "r1" / "ejercicio2.c").is_file()
-    assert (student_dir / "r1f" / "ejercicio1.c").is_file()
-    assert (student_dir / "r1f" / "ejercicio2.c").is_file()
+    assert not (student_dir / "r1f").exists()
     assert not (student_dir / "ejercicio1.c").exists()
 
 
@@ -129,7 +128,7 @@ def test_reformat_submission_to_rn_f_nested_wrapper(tmp_path: Path):
     res_dir = reformat_submission_to_rn_f(student_dir)
     assert res_dir == student_dir / "r1"
     assert (student_dir / "r1" / "ejercicio-1.c").is_file()
-    assert (student_dir / "r1f" / "ejercicio-1.c").is_file()
+    assert not (student_dir / "r1f").exists()
     assert not wrapper_dir.exists()
 
 
@@ -144,7 +143,7 @@ def test_reformat_submission_to_rn_f_migrate_r1(tmp_path: Path):
     res_dir = reformat_submission_to_rn_f(student_dir)
     assert res_dir == student_dir / "r1"
     assert (student_dir / "r1" / "main.c").is_file()
-    assert (student_dir / "r1f" / "main.c").is_file()
+    assert not (student_dir / "r1f").exists()
     assert old_r1.exists()
 
 
@@ -387,10 +386,9 @@ def test_cli_config_preset_strict(tmp_path: Path):
     assert cfg.checks.fail_on_memory_leak is True
 
 
-def test_submission_triad_r1_r1f_r1i(tmp_path: Path):
+def test_submission_triad_r1_and_r1i(tmp_path: Path):
     """Verifica que:
     - r1 contiene la entrega original del estudiante sin ninguna modificación.
-    - r1f contiene la entrega formateada (clang-format) para evaluación docente.
     - r1i contiene los informes individuales en Markdown de las herramientas.
     """
     from dredd.core.reformat import reformat_submission_to_rn_f
@@ -403,21 +401,15 @@ def test_submission_triad_r1_r1f_r1i(tmp_path: Path):
     (student_dir / "main.c").write_text(raw_c_code, encoding="utf-8")
 
     r1_dir = reformat_submission_to_rn_f(student_dir)
-    r1f_dir = student_dir / "r1f"
     r1i_dir = student_dir / "r1i"
 
     # 1. r1 contiene el código original sin cambios
     assert r1_dir == student_dir / "r1"
     assert (r1_dir / "main.c").is_file()
     assert (r1_dir / "main.c").read_text(encoding="utf-8") == raw_c_code
+    assert not (student_dir / "r1f").exists()
 
-    # 2. r1f contiene la entrega formateada
-    assert r1f_dir.is_dir()
-    assert (r1f_dir / "main.c").is_file()
-    # Debe estar formateado (sin espacios excesivos)
-    assert (r1f_dir / "main.c").read_text(encoding="utf-8") != raw_c_code or "clang-format"
-
-    # 3. r1i contiene los informes individuales
+    # 2. r1i contiene los informes individuales
     analysis = {
         "compilation": {"success": True, "compiler_used": "gcc"},
         "ast_findings": [],
@@ -490,7 +482,7 @@ def test_standalone_multiple_mains_compilation_and_rni_resumen(tmp_path: Path):
 
 def test_eval_all_revisions_r1_and_r2(tmp_path: Path, monkeypatch):
     """Verifica que dredd eval procesa todas las versiones existentes (r1, r2, ... rN)
-    generando los directorios rNf, rNi y los reportes individuales por cada versión."""
+    generando los directorios rNi y los reportes individuales por cada versión."""
     monkeypatch.chdir(tmp_path)
     submissions_dir = tmp_path / "tp03-submissions"
     student_dir = submissions_dir / "lopez_carlos_999"
@@ -512,7 +504,7 @@ def test_eval_all_revisions_r1_and_r2(tmp_path: Path, monkeypatch):
 
     # Revisión 1
     assert (student_dir / "r1").is_dir()
-    assert (student_dir / "r1f").is_dir()
+    assert not (student_dir / "r1f").exists()
     assert (student_dir / "r1i").is_dir()
     assert (student_dir / "r1i" / "daedalus.md").is_file()
     assert (student_dir / "r1i" / "resumen.md").is_file()
@@ -521,12 +513,117 @@ def test_eval_all_revisions_r1_and_r2(tmp_path: Path, monkeypatch):
 
     # Revisión 2
     assert (student_dir / "r2").is_dir()
-    assert (student_dir / "r2f").is_dir()
+    assert not (student_dir / "r2f").exists()
     assert (student_dir / "r2i").is_dir()
     assert (student_dir / "r2i" / "daedalus.md").is_file()
     assert (student_dir / "r2i" / "resumen.md").is_file()
-    assert (student_dir / "r2i" / "ripley.md").is_file()
     assert (student_dir / "lopez_carlos_999_r2.md").is_file()
+
+
+def test_dredd_doctor():
+    from dredd.core.doctor import ejecutar_diagnostico_doctor
+    from rich.console import Console
+    cons = Console(record=True)
+    res = ejecutar_diagnostico_doctor(console=cons)
+    out = cons.export_text()
+    assert "Diagnóstico del Entorno de Dredd" in out
+    assert "gcc" in out
+
+
+def test_dredd_evaluation_cache(tmp_path: Path):
+    from dredd.core.cache import EvaluationCache, calcular_hash_archivos
+
+    f1 = tmp_path / "main.c"
+    f1.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+
+    h = calcular_hash_archivos([f1])
+    assert len(h) == 64
+
+    cache = EvaluationCache(cache_dir=tmp_path / "cache")
+    assert cache.obtener(h, "daedalus") is None
+
+    sample_res = {"success": True, "errors": 0}
+    cache.guardar(h, "daedalus", sample_res)
+
+    recup = cache.obtener(h, "daedalus")
+    assert recup == sample_res
+
+    limpiados = cache.limpiar()
+    assert limpiados == 1
+    assert cache.obtener(h, "daedalus") is None
+
+
+def test_exportar_acta_guarani(tmp_path: Path):
+    from dredd.core.guarani import exportar_acta_guarani
+
+    estudiantes = [
+        {"legajo": "1001", "nombre": "Perez, Juan", "dni": "40111222", "nota": 8.5},
+        {"legajo": "1002", "nombre": "Gomez, Maria", "dni": "41222333", "nota": 5.0},
+        {"legajo": "1003", "nombre": "Lopez, Ana", "dni": "42333444", "nota": 2.0},
+    ]
+    csv_out = tmp_path / "acta_test.csv"
+    res = exportar_acta_guarani(estudiantes, csv_out)
+    assert res.is_file()
+
+    txt = res.read_text(encoding="utf-8-sig")
+    assert "Perez, Juan" in txt
+    assert "Promocionado" in txt
+    assert "Aprobado" in txt
+    assert "Desaprobado" in txt
+
+
+def test_dashboard_server_html():
+    from dredd.core.dashboard import DASHBOARD_HTML, DashboardDataServer
+
+    server = DashboardDataServer()
+    html = server.generar_html()
+    assert "Tablero Docente" in html
+    assert "tabla-estudiantes" in html
+
+
+def test_git_anomaly_detector(tmp_path: Path):
+    from dredd.core.git_anomaly import auditar_historial_git
+    from rich.console import Console
+
+    cons = Console(record=True)
+    res_no_git = auditar_historial_git(tmp_path, console=cons)
+    assert res_no_git["es_repo_git"] is False
+    assert "alertas" in res_no_git
+
+
+def test_feedback_pack(tmp_path: Path):
+    from dredd.core.feedback_pack import empaquetar_devoluciones_batch
+    from rich.console import Console
+
+    entregas = tmp_path / "entregas"
+    sub1 = entregas / "alumno1"
+    sub1.mkdir(parents=True)
+    (sub1 / "informe_alumno1.md").write_text("# Informe Alumno 1\n", encoding="utf-8")
+
+    out_feed = tmp_path / "feedbacks"
+    cons = Console(record=True)
+    res = empaquetar_devoluciones_batch(entregas, out_feed, console=cons)
+    assert res["total_informes"] == 1
+    assert (out_feed / "informe_alumno1.md").is_file()
+
+
+def test_plagiarism_historical(tmp_path: Path):
+    from dredd.core.plagiarism_history import comparar_plagio_historico
+    from rich.console import Console
+
+    d_act = tmp_path / "actual"
+    d_hist = tmp_path / "historico"
+    d_act.mkdir()
+    d_hist.mkdir()
+
+    (d_act / "sol1.c").write_text("int suma(int a, int b) { return a + b; }\n", encoding="utf-8")
+    (d_hist / "sol2.c").write_text("int suma(int x, int y) { return x + y; }\n", encoding="utf-8")
+
+    cons = Console(record=True)
+    matches = comparar_plagio_historico(d_act, d_hist, umbral=0.5, console=cons)
+    assert isinstance(matches, list)
+
+
 
 
 

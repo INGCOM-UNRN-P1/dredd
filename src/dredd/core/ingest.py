@@ -252,17 +252,12 @@ class MoodleIngestor:
                             next_version = latest_rev["version_num"] + 1
 
                     if is_new:
-                        from dredd.core.reformat import generate_rn_f_copy
                         rev_folder_name = f"r{next_version}"
                         rev_dir = student_dir / rev_folder_name
                         rev_dir.mkdir(parents=True, exist_ok=True)
 
                         for src in sources:
                             (rev_dir / src.filename).write_bytes(src.content)
-
-                        # Generar copia formateada rNf para revisión manual docente
-                        rf_dir = student_dir / f"r{next_version}f"
-                        generate_rn_f_copy(rev_dir, rf_dir)
 
                         db.add_revision(
                             student_slug=parsed_student.student_slug,

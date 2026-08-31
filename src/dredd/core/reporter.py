@@ -392,10 +392,31 @@ def generate_consolidated_report_from_rni(
         "daedalus.md",
         "ripley.md",
         "tests.md",
+        "nostromo.md",
         "valgrind.md",
+        "tetsuo.md",
+        "hal.md",
         "gaff.md",
         "kaneda.md",
         "spunkmeyer.md",
+        "brett.md",
+        "bishop.md",
+        "callahan.md",
+        "motoko.md",
+        "wierzbowski.md",
+        "corbel.md",
+        "zhora.md",
+        "crowe.md",
+        "dietrich.md",
+        "drake.md",
+        "vasquez.md",
+        "vassili.md",
+        "giger.md",
+        "sebastian.md",
+        "rachel.md",
+        "ferro.md",
+        "kane.md",
+        "weyl.md",
         "diagramas.md",
         "similarity.md",
         "oral_questions.md",
@@ -407,14 +428,18 @@ def generate_consolidated_report_from_rni(
         for p_name in priority_order:
             p_file = rni_dir / p_name
             if p_file.is_file():
-                lines.append("\n" + p_file.read_text(encoding="utf-8", errors="replace").strip())
+                content = p_file.read_text(encoding="utf-8", errors="replace").strip()
+                if content:
+                    lines.append("\n" + content)
                 included_files.add(p_file.name)
 
         # Incluir cualquier otra herramienta arbitraria presente en rNi/*.md
         for other_md in sorted(rni_dir.glob("*.md")):
             if other_md.name not in included_files and other_md.name not in ("informe.md", "informe_consolidado.md"):
-                lines.append(f"\n## Herramienta: {other_md.stem.title()}")
-                lines.append(other_md.read_text(encoding="utf-8", errors="replace").strip())
+                content = other_md.read_text(encoding="utf-8", errors="replace").strip()
+                if content:
+                    lines.append("\n" + content)
+                    included_files.add(other_md.name)
 
     # 4. Footer template
     footer_file = template_dir / "footer.md"
