@@ -174,3 +174,57 @@ check-dredd:
 ````
 
 Ejecutá `make check-dredd` antes de cada commit para asegurar que tu código conserve el estado de aprobación.
+
+---
+
+(manual-dredd-arquitectura)=
+## 7. Arquitectura Interna y Mecanismo Técnico
+
+La herramienta **`dredd`** implementa un motor de alta precisión basado en:
+
+- **Tecnología Núcleo:** `Async Subprocess Engine + SQLite Cache SHA-256 + Winnowing Plagiarism AST + Typst / Rich Exporters`.
+- **Aislamiento y Determinismo:** Diseñada para operar sin efectos colaterales en entornos de integración continua (CI), terminales de estudiantes y servidores docentes headless.
+- **Manejo de Errores Pedagógico:** Todo fallo de sintaxis, memoria o lógica se traduce en una acción prescriptiva concreta con su respectiva justificación técnica.
+
+---
+
+(manual-dredd-ecosistema)=
+## 8. Integración y Conexión con el Ecosistema
+
+````{note}
+Ninguna herramienta opera de forma aislada. **`dredd`** forma parte del pipeline integral de evaluación, verificación y enseñanza de la cátedra.
+````
+
+### Diagrama de Flujo e Interoperabilidad
+
+````{mermaid}
+graph TD
+    MDL[Moodle / GitHub Classroom] --> DRD[Dredd: Orquestador Masivo]
+    DKD[Deckard: Guías y Criterios] --> DRD
+    DRD -->|Ejecución Segura| NOS[Nostromo: Sandbox Bubblewrap]
+    DRD -->|Linting Integral| RIP[Ripley: Reglas 0xXXXXh]
+    DRD -->|Inyección de Fallos| VAS[Vasquez: Robustez LD_PRELOAD]
+    DRD -->|Diagnóstico de Caídas| HAL[Hal: Forense Post-Mortem]
+    DRD -->|Detección de Plagio| WIN[Winnowing AST Plagiarism]
+    DRD -->|Informes y Actas| OUT[alumno_rN.md / SIU Guaraní CSV]
+````
+
+### Matriz de Intercambio de Datos
+
+| Canal | Herramientas Conectadas | Tipo de Datos Transferidos |
+| :--- | :--- | :--- |
+| **Entradas (Inputs)** | - `ZIPs Moodle, repos GitHub Classroom, guías Deckard, linters Ripley` | Código fuente, AST, binarios, testcases, contratos |
+| **Salidas (Outputs)** | - `Estudiantes (informes alumno_rN.md)`
+- `SIU Guaraní (actas CSV)`
+- `Docentes (diff reentregas)` | Informes Markdown, diagnósticos Rich, JSON, actas |
+| **Sincronización** | `deckard`, `ripley`, `nostromo`, `weyl`, `hal`, `vasquez` | Validación cruzada, flags compartidos y autofix |
+
+### Pipeline de Integración Recomendado
+
+Podés encadenar `dredd` con otras herramientas del ecosistema en una única línea de comando:
+
+````{code-block} bash
+# Pipeline de integración típico
+dredd eval tp1 --all && dredd diff-submission alumno_perez r1 r2 --md reporte_r2.md
+````
+
