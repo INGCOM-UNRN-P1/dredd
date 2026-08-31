@@ -349,3 +349,12 @@ Podés encadenar `dredd` con otras herramientas del ecosistema en una única lí
 dredd eval tp1 --all && dredd diff-submission alumno_perez r1 r2 --md reporte_r2.md
 ````
 
+---
+
+(manual-dredd-seccion-plugins)=
+## 9. Extensión, Desarrollo de Plugins y API Python
+
+Para crear tus propias reglas, conectores de evaluación o integrar `dredd` programáticamente en pipelines de CI/CD:
+
+- 👉 **Consultá la guía completa:** [Guía de Extensión y Creación de Plugins](plugins.md)
+
