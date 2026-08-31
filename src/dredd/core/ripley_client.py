@@ -315,18 +315,18 @@ def run_ripley_analysis(
         cli_override=tipo_entrega,
     ) if cfg else ("makefile" if (tipo_entrega in ("makefile", "proyecto", "libreria") or (target_path / "Makefile").is_file() or (target_path / "makefile").is_file()) else "archivos_individuales")
 
-    # 1. Intentar importación directa si Ripley está en el entorno Python (sólo para proyectos o librerías multi-archivo)
+    # 1. Intentar importación directa de Ripley si está disponible en el entorno
     res_dict = None
-    if checks.ripley_enabled and effective_mode in ("proyecto", "libreria"):
+    if checks.ripley_enabled:
         try:
             from ripley.core.engine import analyze_target
             result = analyze_target(target_path)
             res_dict = result.to_dict()
-        except ImportError:
+        except Exception:
             pass
 
-    # 2. Intentar ejecución vía comando CLI de ripley si no se obtuvo por import (sólo modo proyecto)
-    if res_dict is None and checks.ripley_enabled and effective_mode in ("proyecto", "libreria"):
+    # 2. Intentar ejecución vía comando CLI de ripley si no se obtuvo por import
+    if res_dict is None and checks.ripley_enabled:
         ripley_bin = shutil.which("ripley") or shutil.which("ripley-check")
         if ripley_bin:
             try:
