@@ -575,7 +575,7 @@ def cmd_config_show(
     t_chk.add_row("Spunkmeyer (Antipatrones)", spk_status, f"Ban feof: {chk.ban_feof_loop} | Ban gets: {chk.ban_gets}")
 
     gaff_status = "[green]ACTIVO[/green]" if chk.gaff_enabled else "[red]DESHABILITADO[/red]"
-    t_chk.add_row("Gaff (Estilo Cátedra)", gaff_status, f"Snake_case: {chk.enforce_snake_case}")
+    t_chk.add_row("Gaff (Estilo Cátedra)", gaff_status, f"Snake_case: {chk.enforce_snake_case} | Var length: {chk.enforce_variable_length}")
 
     daed_status = "[green]ACTIVO[/green]"
     t_chk.add_row("Daedalus (Compilador)", daed_status, f"Compiler: {chk.daedalus_compiler.upper()} | Flags: {chk.compiler_flags}")

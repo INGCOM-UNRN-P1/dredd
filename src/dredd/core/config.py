@@ -47,6 +47,7 @@ class ToolChecksConfig:
     enforce_snake_case: bool = True
     enforce_header_guards: bool = True
     ban_tab_indentation: bool = True
+    enforce_variable_length: bool = True
 
     # Daedalus / Compilador
     daedalus_compiler: str = "esper"  # "esper", "gcc", "clang"
@@ -101,6 +102,7 @@ class ToolChecksConfig:
             enforce_snake_case=True,
             enforce_header_guards=True,
             ban_tab_indentation=True,
+            enforce_variable_length=True,
             daedalus_compiler="esper",
             compiler_flags="-Wall -Wextra -Werror -pedantic -std=c11 -Wconversion -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wcast-align -Wwrite-strings -fsanitize=address,undefined",
             treat_warnings_as_errors=True,
@@ -157,6 +159,7 @@ class ToolChecksConfig:
             enforce_snake_case=gaff_data.get("enforce_snake_case", data.get("enforce_snake_case", True)),
             enforce_header_guards=gaff_data.get("enforce_header_guards", True),
             ban_tab_indentation=gaff_data.get("ban_tab_indentation", True),
+            enforce_variable_length=gaff_data.get("enforce_variable_length", data.get("enforce_variable_length", True)),
             daedalus_compiler=daed_data.get("compiler", data.get("daedalus_compiler", "esper")),
             compiler_flags=daed_data.get("flags", data.get("compiler_flags", "-Wall -Wextra -std=c11")),
             treat_warnings_as_errors=daed_data.get("treat_warnings_as_errors", False),
@@ -210,6 +213,7 @@ class ToolChecksConfig:
                 "enforce_snake_case": self.enforce_snake_case,
                 "enforce_header_guards": self.enforce_header_guards,
                 "ban_tab_indentation": self.ban_tab_indentation,
+                "enforce_variable_length": self.enforce_variable_length,
             },
             "brett": {
                 "enabled": self.brett_enabled,

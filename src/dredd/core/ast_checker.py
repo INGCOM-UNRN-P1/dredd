@@ -262,13 +262,29 @@ def audit_c_file(c_file: Path) -> List[Dict[str, Any]]:
     # Variables sospechosas (0x0001h)
     vars_found = check_regla_0x0001(content)
     for name, line_num in vars_found:
-        if len(name) < 3 and name not in ("i", "j", "k", "n", "fd", "fp"):
+        if len(name) == 1 and name.lower() not in ("i", "j", "k", "n", "x", "y", "z", "f", "c", "r"):
             findings.append({
                 "rule_id": "0x0001h",
                 "line": line_num,
                 "severity": "ADVERTENCIA",
-                "message": f"Identificador muy corto o poco descriptivo: '{name}'.",
-                "suggestion": "Usar un nombre autoexplicativo (ej. 'contador', 'indice').",
+                "message": f"Identificador de variable no descriptivo de una sola letra '{name}'.",
+                "suggestion": "Los nombres de variables deben reflejar con precisión su propósito (salvo índices canónicos i, j, k, n, x, y, z, f, c, r).",
+            })
+        elif 1 < len(name) < 4 and name.lower() not in ("fd", "fp", "in", "ok"):
+            findings.append({
+                "rule_id": "0x0001h",
+                "line": line_num,
+                "severity": "ADVERTENCIA",
+                "message": f"Identificador corto y poco expresivo '{name}' ({len(name)} caracteres).",
+                "suggestion": "Se recomienda utilizar identificadores más descriptivos del dominio del problema.",
+            })
+        elif len(name) > 31:
+            findings.append({
+                "rule_id": "0x0001h",
+                "line": line_num,
+                "severity": "ADVERTENCIA",
+                "message": f"Identificador excesivamente largo '{name}' ({len(name)} caracteres).",
+                "suggestion": "Los identificadores no deben superar los 31 caracteres para mantener la legibilidad.",
             })
 
     # Chequeos línea por línea

@@ -1,32 +1,47 @@
 """Cliente para invocar el motor Ripley desde Dredd."""
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from dredd.core.config import ToolChecksConfig
 
 from dredd.core.compiler import compile_c_sources
 from dredd.core.sandbox import execute_sandboxed, audit_sandbox_evasion
 from dredd.core.valgrind import run_valgrind_check, ValgrindReport
 
 
-def audit_style_with_gaff(target_path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+def audit_style_with_gaff(
+    target_path: Path,
+    checks: Optional[ToolChecksConfig] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Ejecuta el linter de estilo Gaff sobre los archivos C y H del estudiante."""
     findings = []
-    c_and_h_files = sorted([
-        f for f in target_path.glob("**/*")
-        if f.is_file() and f.suffix.lower() in (".c", ".h", ".hpp") and not any(p.startswith(".") for p in f.parts)
-    ])
+    if target_path.is_file():
+        c_and_h_files = [target_path] if target_path.suffix.lower() in (".c", ".h", ".hpp") else []
+    else:
+        c_and_h_files = sorted([
+            f for f in target_path.glob("**/*")
+            if f.is_file() and f.suffix.lower() in (".c", ".h", ".hpp") and not any(p.startswith(".") for p in f.parts)
+        ])
+
+    enforce_var_len = checks.enforce_variable_length if checks else True
 
     try:
         from gaff.core.linter import analizar_archivo
         for f in c_and_h_files:
             viols = analizar_archivo(f)
             for v in viols:
+                rc = str(v.codigo)
+                if not enforce_var_len and rc in ("0x0001h", "GAFF011"):
+                    continue
                 findings.append({
-                    "rule_code": v.codigo,
+                    "rule_code": rc,
                     "title": v.titulo,
                     "file": f.name,
                     "line": v.linea,
@@ -37,9 +52,11 @@ def audit_style_with_gaff(target_path: Path) -> Tuple[List[Dict[str, Any]], Dict
                 })
     except ImportError:
         # Fallback de linter de estilo si gaff no está instalado como paquete Python
+        from dredd.core.ast_checker import check_regla_0x0001
         for f in c_and_h_files:
             try:
-                lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+                content = f.read_text(encoding="utf-8", errors="replace")
+                lines = content.splitlines()
                 for idx, l in enumerate(lines, start=1):
                     if len(l) > 80:
                         findings.append({
@@ -63,6 +80,42 @@ def audit_style_with_gaff(target_path: Path) -> Tuple[List[Dict[str, Any]], Dict
                             "suggestion": "Configurá tu editor para usar 4 espacios en lugar de tabuladores.",
                             "autofixable": True,
                         })
+                if enforce_var_len:
+                    vars_found = check_regla_0x0001(content)
+                    for name, line_num in vars_found:
+                        if len(name) == 1 and name.lower() not in ("i", "j", "k", "n", "x", "y", "z", "f", "c", "r"):
+                            findings.append({
+                                "rule_code": "0x0001h",
+                                "title": "Identificador de variable no descriptivo",
+                                "file": f.name,
+                                "line": line_num,
+                                "column": 1,
+                                "message": f"Identificador de variable no descriptivo de una sola letra '{name}'.",
+                                "suggestion": "Los nombres de variables deben reflejar con precisión su propósito (salvo índices canónicos i, j, k, n, x, y, z, f, c, r).",
+                                "autofixable": False,
+                            })
+                        elif 1 < len(name) < 4 and name.lower() not in ("fd", "fp", "in", "ok"):
+                            findings.append({
+                                "rule_code": "0x0001h",
+                                "title": "Identificador corto y poco expresivo",
+                                "file": f.name,
+                                "line": line_num,
+                                "column": 1,
+                                "message": f"Identificador corto y poco expresivo '{name}' ({len(name)} caracteres).",
+                                "suggestion": "Se recomienda utilizar identificadores más descriptivos del dominio del problema.",
+                                "autofixable": False,
+                            })
+                        elif len(name) > 31:
+                            findings.append({
+                                "rule_code": "0x0001h",
+                                "title": "Identificador excesivamente largo",
+                                "file": f.name,
+                                "line": line_num,
+                                "column": 1,
+                                "message": f"Identificador excesivamente largo '{name}' ({len(name)} caracteres).",
+                                "suggestion": "Los identificadores no deben superar los 31 caracteres.",
+                                "autofixable": False,
+                            })
             except Exception:
                 pass
 
@@ -472,13 +525,14 @@ def run_ripley_analysis(
     if "ast_findings" in res_dict:
         raw_findings = res_dict["ast_findings"]
         filtered = []
+        is_all_rules = any(en.lower() in ("all", "*") for en in checks.ripley_rules) if checks.ripley_rules else True
         for f in raw_findings:
             rc = (f.get("rule_code") or f.get("rule_id") or "").lower()
             # Si la regla está deshabilitada explícitamente, ignorarla
             if any(rc == dis.lower() for dis in checks.ripley_disabled_rules):
                 continue
             # Si hay lista blanca de reglas de Ripley y no es un hallazgo de seguridad
-            if checks.ripley_rules and not rc.startswith("sec") and not f.get("rule_name", "").startswith("[SEGURIDAD]"):
+            if checks.ripley_rules and not is_all_rules and not rc.startswith("sec") and not f.get("rule_name", "").startswith("[SEGURIDAD]"):
                 if not any(rc == en.lower() for en in checks.ripley_rules):
                     continue
             filtered.append(f)
@@ -539,7 +593,7 @@ def run_ripley_analysis(
 
     # 8. Auditoría de estilo y convenciones arquitectónicas (Gaff)
     if checks.gaff_enabled:
-        style_findings, style_metrics = audit_style_with_gaff(target_path)
+        style_findings, style_metrics = audit_style_with_gaff(target_path, checks=checks)
         res_dict["style_findings"] = style_findings
         res_dict["style_metrics"] = style_metrics
 
