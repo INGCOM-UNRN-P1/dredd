@@ -860,11 +860,26 @@ def cmd_export_guarani(
 @app.command("serve-dashboard")
 def cmd_dashboard(
     port: int = typer.Option(8000, "--port", "-p", help="Puerto HTTP para el servidor de dashboard local."),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="Dirección IP o host local de escucha."),
+    entregas: Path = typer.Option(Path("entregas"), "--entregas", "-e", help="Directorio con las entregas de los estudiantes para extraer notas."),
+    data_file: Optional[Path] = typer.Option(None, "--data", "-d", help="Ruta a un archivo JSON con métricas precalculadas."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Muestra información detallada de diagnóstico y registro de peticiones HTTP en consola."),
 ) -> None:
     """Inicia un servidor web local para visualizar el dashboard de notas y plagio."""
-    from dredd.core.dashboard import DASHBOARD_HTML
-    console.print(f"[bold cyan]⚖️ Iniciando servidor de Dashboard Docente en:[/bold cyan] [green]http://localhost:{port}[/green]")
-    console.print("[dim]Presioná Ctrl+C para detener el servidor.[/dim]")
+    from dredd.core.dashboard import recolectar_datos_dashboard, servir_dashboard
+
+    data = recolectar_datos_dashboard(entregas_dir=entregas, data_json=data_file)
+    try:
+        servir_dashboard(
+            data=data,
+            port=port,
+            host=host,
+            verbose=verbose,
+            console=console,
+            entregas_path=entregas,
+        )
+    except OSError:
+        raise typer.Exit(code=1)
 
 
 @app.command("audit-git")
