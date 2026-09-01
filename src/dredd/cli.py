@@ -25,6 +25,9 @@ app.add_typer(moodle_app, name="moodle")
 config_app = typer.Typer(name="config", help="Gestión de configuración, entregas, guías y políticas de chequeo.", no_args_is_help=True)
 app.add_typer(config_app, name="config")
 
+evaluate_app = typer.Typer(name="evaluate", help="Evaluación docente, autograding y limpieza de entregas.", no_args_is_help=True)
+app.add_typer(evaluate_app, name="evaluate")
+
 console = Console()
 
 
@@ -79,6 +82,15 @@ def cmd_eval(
     ),
 ) -> None:
     """Clona/actualiza el repositorio o evalúa entregas locales, ejecuta el análisis con Ripley y genera el informe Markdown."""
+    if exercise == "clean":
+        ejecutar_limpieza_evaluaciones(
+            exercise=student,
+            student=None,
+            all_students=all_students,
+            dry_run=dry_run,
+        )
+        return
+
     workspace_dir = Path.cwd()
     exercise_slug, submissions_dir = resolve_submissions_dir(workspace_dir, exercise)
     guide = load_activity_guide(submissions_dir, exercise_slug, workspace_dir)
@@ -187,6 +199,161 @@ def cmd_eval(
     console.print("\n")
     console.print(table)
     console.print("\n[dim]Para enviar los comentarios a los PRs correspondientes, ejecute: dredd comment <ejercicio> <estudiante>[/dim]\n")
+
+
+def ejecutar_limpieza_evaluaciones(
+    exercise: Optional[str] = None,
+    student: Optional[str] = None,
+    all_students: bool = False,
+    dry_run: bool = False,
+    rni_only: bool = False,
+    reports_only: bool = False,
+    verbose: bool = False,
+) -> None:
+    from dredd.core.eval_clean import limpiar_evaluaciones
+    from dredd.core.git_ops import resolve_submissions_dir
+
+    workspace_dir = Path.cwd()
+    target_dir: Path
+
+    if exercise:
+        _, target_dir = resolve_submissions_dir(workspace_dir, exercise)
+    else:
+        cand = workspace_dir / "entregas"
+        target_dir = cand if cand.is_dir() else workspace_dir
+
+    rni_clean = not bool(reports_only)
+    informes_clean = not bool(rni_only)
+
+    res = limpiar_evaluaciones(
+        base_dir=target_dir,
+        student=student,
+        dry_run=bool(dry_run),
+        limpiar_rni=rni_clean,
+        limpiar_informes=informes_clean,
+    )
+
+    rni_count = len(res["directorios_rni"])
+    inf_count = len(res["informes"])
+    est_count = res["estudiantes_afectados"]
+    kb_liberados = res["bytes_liberados"] / 1024
+
+    if dry_run:
+        console.print(f"[bold yellow]⚡ Modo Simulación (Dry Run):[/bold yellow] Inspección de limpieza sobre [cyan]{target_dir}[/cyan]")
+    else:
+        console.print(f"[bold green]✓ Limpieza de evaluaciones completada en:[/bold green] [cyan]{target_dir}[/cyan]")
+
+    if rni_count == 0 and inf_count == 0:
+        console.print("[dim]No se encontraron evaluaciones previas (directorios rNi ni informes) para limpiar.[/dim]")
+        return
+
+    console.print(f"  • [bold]Directorios rNi {'a eliminar' if dry_run else 'eliminados'}:[/bold] [cyan]{rni_count}[/cyan]")
+    console.print(f"  • [bold]Informes {'a eliminar' if dry_run else 'eliminados'}:[/bold] [cyan]{inf_count}[/cyan]")
+    console.print(f"  • [bold]Estudiantes afectados:[/bold] [cyan]{est_count}[/cyan]")
+    console.print(f"  • [bold]Espacio {'estimado' if dry_run else 'liberado'}:[/bold] [green]{kb_liberados:.1f} KB[/green]\n")
+
+    if verbose:
+        if res["directorios_rni"]:
+            console.print("[bold underline]Directorios rNi:[/bold underline]")
+            for d in res["directorios_rni"]:
+                try:
+                    rel = d.relative_to(workspace_dir)
+                except ValueError:
+                    rel = d
+                console.print(f"  [red]✖ [DIR][/red] {rel}")
+
+        if res["informes"]:
+            console.print("\n[bold underline]Informes:[/bold underline]")
+            for f in res["informes"]:
+                try:
+                    rel = f.relative_to(workspace_dir)
+                except ValueError:
+                    rel = f
+                console.print(f"  [red]✖ [FILE][/red] {rel}")
+
+
+@evaluate_app.command("clean")
+@app.command("clean-eval", hidden=True)
+def cmd_evaluate_clean(
+    exercise: Optional[str] = typer.Argument(
+        None,
+        help="Nombre de la actividad o ruta al directorio de entregas (ej. tp01, ./entregas). Si no se indica, limpia en ./entregas o en el directorio actual.",
+    ),
+    student: Optional[str] = typer.Argument(
+        None,
+        help="Nombre de usuario del estudiante específico a limpiar (opcional; por defecto limpia todos).",
+    ),
+    all_students: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Limpiar todas las entregas encontradas.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        "-n",
+        help="Modo simulación: muestra qué carpetas rNi e informes se eliminarían sin borrar archivos.",
+    ),
+    rni_only: bool = typer.Option(
+        False,
+        "--rni-only",
+        help="Limpiar exclusivamente los directorios rNi de herramientas, conservando los informes consolidados.",
+    ),
+    reports_only: bool = typer.Option(
+        False,
+        "--reports-only",
+        help="Limpiar exclusivamente los archivos de informes Markdown/HTML/PDF, conservando los directorios rNi.",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Muestra cada archivo y carpeta eliminado en consola.",
+    ),
+) -> None:
+    """Limpia las evaluaciones anteriores: elimina los directorios rNi y los informes generados."""
+    ejecutar_limpieza_evaluaciones(
+        exercise=exercise,
+        student=student,
+        all_students=all_students,
+        dry_run=dry_run,
+        rni_only=rni_only,
+        reports_only=reports_only,
+        verbose=verbose,
+    )
+
+
+@evaluate_app.command("run")
+def cmd_evaluate_run(
+    exercise: str = typer.Argument(..., help="Nombre de la actividad / ejercicio o ruta al directorio de entregas."),
+    student: Optional[str] = typer.Argument(None, help="Nombre de usuario del estudiante (opcional si se usa --all)."),
+    org: str = typer.Option("INGCOM-UNRN-P1", "--org", "-o", help="Organización de GitHub."),
+    all_students: bool = typer.Option(False, "--all", "-a", help="Evaluar todos los estudiantes presentes en el workspace."),
+    template_dir: Path = typer.Option(Path("informe"), "--template-dir", "-t", help="Directorio con header.md y footer.md."),
+    tipo_entrega: Optional[str] = typer.Option(
+        None,
+        "--tipo-entrega",
+        "--build-mode",
+        "-m",
+        help="Tipo de entrega / modo de construcción ('archivos_individuales' vs 'makefile' vs 'proyecto' / 'libreria').",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Modo Dry Run: evalúa únicamente una muestra de hasta 3 estudiantes representativos antes del lote completo.",
+    ),
+) -> None:
+    """Clona/actualiza el repositorio o evalúa entregas locales, ejecuta el análisis con Ripley y genera el informe Markdown."""
+    cmd_eval(
+        exercise=exercise,
+        student=student,
+        org=org,
+        all_students=all_students,
+        template_dir=template_dir,
+        tipo_entrega=tipo_entrega,
+        dry_run=dry_run,
+    )
 
 
 @app.command("comment")

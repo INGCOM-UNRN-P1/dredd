@@ -32,6 +32,11 @@ dredd eval tp01 alvarez_juan
 
 # Evaluar toda la cohorte presente en el workspace
 dredd eval tp01 --all
+
+# Limpiar evaluaciones previas (carpetas rNi e informes generados)
+dredd evaluate clean tp01
+dredd evaluate clean tp01 alvarez_juan
+dredd evaluate clean tp01 --dry-run   # Simulación sin borrar
 ```
 
 #### Publicación de Feedback en GitHub (`dredd comment`)
