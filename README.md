@@ -4,6 +4,37 @@ Orquestador docente de evaluación masiva, autograding multicanal y gestión de 
 
 ---
 
+## 🎯 Alcance
+
+### Qué cubre
+- Orquestación central de corrección masiva de trabajos prácticos y exámenes de programación en C.
+- Ingesta y normalización de entregas provenientes de Moodle (ZIPs) y GitHub Classroom (repositorios Git).
+- Calificación ponderada y gestión de base de datos relacional SQLite (`dredd.db`).
+- Detección de plagio y copias entre estudiantes mediante algoritmo de huellas digitales de Winnowing.
+- Re-evaluación incremental rápida (`dredd rerun --failed-only` y `--dry-run`).
+- Generación de reportes de devolución individual en Markdown y actas consolidadas.
+
+### Qué no cubre (Límites y Delegación)
+- Compilación directa de código (delega en `daedalus`).
+- Ejecución aislada de binarios (delega en `nostromo`).
+- Linter de reglas de cátedra y estilo (delega en `ripley`).
+- Creación de guías de ejercicios (delega en `deckard`).
+
+---
+
+## 📋 Requisitos
+
+### Requisitos de Sistema y Entorno
+- Linux (nativo o WSL). Python >= 3.10.
+
+### Dependencias Externas y Binarios
+- `sqlite3`, `git`, y herramientas del ecosistema en PATH (`daedalus`, `nostromo`, `ripley`).
+
+### Integración en el Ecosistema
+- CLI `dredd`. Hub central de calificación docente del ecosistema.
+
+---
+
 ## 🚀 Instalación y Entorno
 
 Dredd está desarrollado en Python 3.11+ con `typer` y `rich`.
