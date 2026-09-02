@@ -305,6 +305,16 @@ class DreddConfig:
         4. Detección automática por presencia de Makefile
         5. Fallback por defecto ('archivos_individuales')
         """
+        if hasattr(cli_override, "default"):
+            cli_override = cli_override.default
+        if not isinstance(cli_override, str):
+            cli_override = None
+
+        if hasattr(guide_mode, "default"):
+            guide_mode = guide_mode.default
+        if not isinstance(guide_mode, str):
+            guide_mode = None
+
         if cli_override and cli_override.lower() not in ("auto", "none", ""):
             return "makefile" if cli_override.lower() in ("make", "makefile", "proyecto", "libreria") else "archivos_individuales"
 

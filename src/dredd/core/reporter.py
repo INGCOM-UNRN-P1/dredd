@@ -53,16 +53,34 @@ def resolve_submission_revision(repo_path: Path, student_slug: str) -> str:
     return "r1"
 
 
-def find_student_report(workspace_dir: Path, exercise: str, student: str) -> Optional[Path]:
-    """Busca el informe Markdown generado más reciente para el estudiante."""
+def find_student_report(
+    workspace_dir: Path,
+    exercise: Optional[str] = None,
+    student: Optional[str] = None,
+) -> Optional[Path]:
+    """Busca el informe Markdown generado más reciente para el estudiante o dentro de un directorio de entrega."""
+    if exercise is None and student is None:
+        student_dir = workspace_dir
+        if student_dir.is_dir():
+            candidates = []
+            for pat in [f"{student_dir.name}_r*.md", "informe_r*.md", f"*_{student_dir.name}_r*.md", "*.md"]:
+                for f in sorted(student_dir.glob(pat)):
+                    if f.is_file() and not f.name.startswith("."):
+                        candidates.append(f)
+            if candidates:
+                candidates.sort(key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
+                return candidates[0]
+        return None
+
     from dredd.core.git_ops import resolve_submissions_dir
 
-    _, submissions_dir = resolve_submissions_dir(workspace_dir, exercise)
-    student_dir = submissions_dir / student
+    _, submissions_dir = resolve_submissions_dir(workspace_dir, exercise or "")
+    student_dir = submissions_dir / (student or "")
 
     if student_dir.is_dir():
         candidates = []
-        for pat in [f"{student}_r*.md", "informe_r*.md", f"*_{student}_r*.md", "*.md"]:
+        student_name = student or student_dir.name
+        for pat in [f"{student_name}_r*.md", "informe_r*.md", f"*_{student_name}_r*.md", "*.md"]:
             for f in sorted(student_dir.glob(pat)):
                 if f.is_file() and not f.name.startswith("."):
                     candidates.append(f)
@@ -70,15 +88,109 @@ def find_student_report(workspace_dir: Path, exercise: str, student: str) -> Opt
             candidates.sort(key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
             return candidates[0]
 
-    root_cand = [
-        workspace_dir / f"{student}.md",
-        workspace_dir / f"{student}_r1.md",
-    ]
-    for c in root_cand:
-        if c.is_file():
-            return c
+    if student:
+        root_cand = [
+            workspace_dir / f"{student}.md",
+            workspace_dir / f"{student}_r1.md",
+        ]
+        for c in root_cand:
+            if c.is_file():
+                return c
 
     return None
+
+
+def is_submission_failed(
+    student_dir: Path,
+    exercise_slug: Optional[str] = None,
+    workspace_dir: Optional[Path] = None,
+) -> bool:
+    """Determina si la entrega de un estudiante está desaprobada, falló en compilación/tests o requiere re-evaluación."""
+    from dredd.core.db import DatabaseManager
+
+    # 1. Chequear SQLite .metadata.db en la carpeta del estudiante o en la carpeta padre
+    for db_cand in [student_dir / ".metadata.db", student_dir.parent / ".metadata.db"]:
+        if db_cand.is_file():
+            try:
+                db = DatabaseManager(db_cand)
+                latest_rev = db.get_latest_revision(student_dir.name)
+                if latest_rev:
+                    with db._get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            "SELECT compilation_status, preliminary_grade FROM evaluations WHERE revision_id = ?",
+                            (latest_rev["id"],),
+                        )
+                        row = cursor.fetchone()
+                        if row:
+                            comp = row["compilation_status"]
+                            grade = row["preliminary_grade"]
+                            # Si falló la compilación o la nota preliminar es < 6.0, falló
+                            if comp != "OK" or (grade is not None and grade < 6.0):
+                                return True
+                            # Chequear tests si los hubo
+                            cursor.execute(
+                                "SELECT passed FROM test_results WHERE evaluation_id IN (SELECT id FROM evaluations WHERE revision_id = ?)",
+                                (latest_rev["id"],),
+                            )
+                            tests = cursor.fetchall()
+                            if tests and any(not t["passed"] for t in tests):
+                                return True
+                            return False
+            except Exception:
+                pass
+
+    # 2. Chequear informe Markdown existente
+    ws = workspace_dir or Path.cwd()
+    rep = None
+    if exercise_slug:
+        rep = find_student_report(ws, exercise_slug, student_dir.name)
+    if not rep:
+        rep = find_student_report(student_dir)
+
+    if not rep or not rep.is_file():
+        # Sin informe previo -> Requiere evaluación
+        return True
+
+    try:
+        content = rep.read_text(encoding="utf-8", errors="replace")
+        failure_markers = [
+            "FALLÓ",
+            "Falló la compilación",
+            "Error de compilación",
+            "ENTREGA NO APROBADA",
+            "REQUIERE REVISIÓN",
+            "✗ FAIL",
+            "❌",
+        ]
+        if any(marker in content for marker in failure_markers):
+            return True
+        if "ENTREGA APROBADA" in content or "✓ Exitosa" in content or "✓ **Estado:** Compilación exitosa" in content:
+            return False
+    except Exception:
+        return True
+
+    # 3. Chequear directorios modulares rNi (daedalus.md, tests.md)
+    for rni in sorted(student_dir.glob("r*i"), reverse=True):
+        daed = rni / "daedalus.md"
+        if daed.is_file():
+            try:
+                d_txt = daed.read_text(encoding="utf-8", errors="replace")
+                if "Falló la compilación" in d_txt or "❌" in d_txt:
+                    return True
+            except Exception:
+                pass
+        tests_md = rni / "tests.md"
+        if tests_md.is_file():
+            try:
+                t_txt = tests_md.read_text(encoding="utf-8", errors="replace")
+                if "Fallaron" in t_txt or "❌" in t_txt:
+                    return True
+            except Exception:
+                pass
+        break
+
+    return False
 
 
 def write_individual_tool_reports(

@@ -1,7 +1,7 @@
 """CLI principal de Dredd: Orquestador de evaluación masiva, autograding y feedback."""
 
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -61,6 +61,162 @@ def cmd_init(
     console.print("[dim]Editá dredd.yaml para configurar los patrones de archivos ZIP y sus guías de Deckard asociadas.[/dim]\n")
 
 
+def _unwrap_cli_value(val: Any, fallback: Any = None) -> Any:
+    """Extrae el valor por defecto si el argumento recibido es un OptionInfo o ArgumentInfo de Typer."""
+    if hasattr(val, "default"):
+        res = val.default
+        if res is ...:
+            return fallback
+        return res
+    return val
+
+
+def ejecutar_evaluacion(
+    exercise: str,
+    student: Optional[str] = None,
+    org: str = "INGCOM-UNRN-P1",
+    all_students: bool = False,
+    template_dir: Path = Path("informe"),
+    tipo_entrega: Optional[str] = None,
+    dry_run: bool = False,
+    failed_only: bool = False,
+    workspace_dir: Optional[Path] = None,
+) -> None:
+    """Ejecuta el ciclo de evaluación sobre una o varias entregas de estudiantes."""
+    from dredd.core.reporter import is_submission_failed
+
+    exercise = _unwrap_cli_value(exercise, "")
+    student = _unwrap_cli_value(student, None)
+    org = _unwrap_cli_value(org, "INGCOM-UNRN-P1")
+    all_students = bool(_unwrap_cli_value(all_students, False))
+    template_dir = _unwrap_cli_value(template_dir, Path("informe"))
+    if not isinstance(template_dir, Path):
+        template_dir = Path(template_dir)
+    tipo_entrega = _unwrap_cli_value(tipo_entrega, None)
+    dry_run = bool(_unwrap_cli_value(dry_run, False))
+    failed_only = bool(_unwrap_cli_value(failed_only, False))
+    ws_dir = (workspace_dir or Path.cwd()).resolve()
+
+    exercise_slug, submissions_dir = resolve_submissions_dir(ws_dir, exercise)
+    guide = load_activity_guide(submissions_dir, exercise_slug, ws_dir)
+
+    # Determinar modo de construcción efectivo con precedencia: CLI override > Guía Deckard > Default
+    effective_tipo = tipo_entrega or getattr(guide, "tipo_entrega", None) or "archivos_individuales"
+    if effective_tipo in ("individual", "archivos", "archivos_individuales"):
+        effective_tipo = "archivos_individuales"
+    elif effective_tipo in ("make", "makefile"):
+        effective_tipo = "makefile"
+    elif effective_tipo in ("proyecto", "project", "libreria", "lib"):
+        effective_tipo = "proyecto"
+
+    target_students = []
+    if student:
+        target_students.append(student)
+    elif all_students:
+        if not submissions_dir.is_dir():
+            console.print(f"[bold red]No existe el directorio de entregas: {submissions_dir}[/bold red]")
+            raise typer.Exit(code=1)
+        all_candidates = [
+            d.name for d in sorted(submissions_dir.iterdir())
+            if d.is_dir() and not d.name.startswith(".") and d.name not in ("guia", "guide", "templates", "informe")
+        ]
+        if failed_only:
+            target_students = [
+                s for s in all_candidates
+                if is_submission_failed(submissions_dir / s, exercise_slug, ws_dir)
+            ]
+            console.print(f"[bold cyan]🔍 Filtrado 'solo fallidas': {len(target_students)} de {len(all_candidates)} entrega(s) requieren re-evaluación.[/bold cyan]")
+        else:
+            target_students = all_candidates
+    else:
+        console.print("[bold red]Debe especificar un estudiante o usar --all.[/bold red]")
+        raise typer.Exit(code=1)
+
+    if dry_run and len(target_students) > 3:
+        console.print(f"[bold yellow]⚡ Modo Dry Run activado: limitando evaluación a las primeras 3 entregas de {len(target_students)}.[/bold yellow]")
+        target_students = target_students[:3]
+
+    if not target_students:
+        if failed_only:
+            console.print(f"[bold green]✓ Todas las entregas en '{submissions_dir.name}' están aprobadas y sin fallos. Nada para re-evaluar.[/bold green]")
+        else:
+            console.print(f"[yellow]No se encontraron carpetas de estudiantes dentro de: {submissions_dir}[/yellow]")
+        return
+
+    if guide and guide.exercises:
+        console.print(f"[bold green]✓ Guía Deckard conectada ('{guide.nombre}'): {len(guide.exercises)} ejercicio(s) ({', '.join(guide.get_exercise_ids())}) | Modo: {effective_tipo}[/bold green]")
+    else:
+        console.print(f"[bold blue]Modo de construcción activo: {effective_tipo}[/bold blue]")
+
+    table = Table(title=f"Evaluación Dredd — {exercise_slug}")
+    table.add_column("Estudiante", style="cyan", justify="left")
+    table.add_column("Compilación", justify="center")
+    table.add_column("Tests", justify="center")
+    table.add_column("Reglas P1 / AST", justify="center")
+    table.add_column("Informe", style="green")
+
+    for s_name in target_students:
+        console.print(f"[bold]Procesando estudiante:[/bold] [cyan]{s_name}[/cyan]...")
+
+        try:
+            repo_path = ensure_submission_repo(org, exercise_slug, s_name, ws_dir, submissions_dir=submissions_dir)
+        except Exception as e:
+            console.print(f"  [red]Error al obtener repositorio:[/red] {e}")
+            table.add_row(s_name, "[red]ERROR[/red]", "—", "—", "No generado")
+            continue
+
+        from dredd.core.reformat import reformat_submission_to_rn_f, find_existing_revision_folders
+        reformat_submission_to_rn_f(repo_path)
+        all_revs = find_existing_revision_folders(repo_path)
+        if not all_revs:
+            all_revs = [(1, repo_path)]
+
+        for rev_num, r_path in all_revs:
+            rev_str = f"r{rev_num}"
+            meta = get_repo_metadata(r_path)
+            analysis = run_ripley_analysis(
+                r_path,
+                guide=guide,
+                activity_slug=exercise_slug,
+                workspace_dir=ws_dir,
+                tipo_entrega=effective_tipo,
+            )
+
+            report_file = repo_path / f"{s_name}_{rev_str}.md"
+            generate_student_report(
+                exercise=exercise_slug,
+                student=s_name,
+                repo_path=r_path,
+                metadata=meta,
+                analysis=analysis,
+                template_dir=template_dir,
+                output_file=report_file,
+                revision=rev_str,
+                guide=guide,
+            )
+
+            comp_ok = analysis.get("compilation", {}).get("success", False)
+            comp_str = "[green]OK[/green]" if comp_ok else "[red]FALLÓ[/red]"
+
+            tests_info = analysis.get("tests", {})
+            tests_str = f"{tests_info.get('passed', 0)}/{tests_info.get('total', 0)}" if tests_info.get("total", 0) > 0 else "N/A"
+
+            ast_count = len(analysis.get("ast_findings", []))
+            ast_str = f"[yellow]{ast_count} obs[/yellow]" if ast_count > 0 else "[green]0 obs[/green]"
+
+            try:
+                display_path = str(report_file.relative_to(ws_dir))
+            except ValueError:
+                display_path = str(report_file)
+
+            student_label = f"{s_name} [{rev_str}]" if len(all_revs) > 1 else s_name
+            table.add_row(student_label, comp_str, tests_str, ast_str, display_path)
+
+    console.print("\n")
+    console.print(table)
+    console.print("\n[dim]Para enviar los comentarios a los PRs correspondientes, ejecute: dredd comment <ejercicio> <estudiante>[/dim]\n")
+
+
 @app.command("eval")
 def cmd_eval(
     exercise: str = typer.Argument(..., help="Nombre de la actividad / ejercicio o ruta al directorio de entregas (ej. tp01, ./entrega-3_1238305/)."),
@@ -91,114 +247,15 @@ def cmd_eval(
         )
         return
 
-    workspace_dir = Path.cwd()
-    exercise_slug, submissions_dir = resolve_submissions_dir(workspace_dir, exercise)
-    guide = load_activity_guide(submissions_dir, exercise_slug, workspace_dir)
-
-    # Determinar modo de construcción efectivo con precedencia: CLI override > Guía Deckard > Default
-    effective_tipo = tipo_entrega or getattr(guide, "tipo_entrega", None) or "archivos_individuales"
-    if effective_tipo in ("individual", "archivos", "archivos_individuales"):
-        effective_tipo = "archivos_individuales"
-    elif effective_tipo in ("make", "makefile"):
-        effective_tipo = "makefile"
-    elif effective_tipo in ("proyecto", "project", "libreria", "lib"):
-        effective_tipo = "proyecto"
-
-    target_students = []
-    if student:
-        target_students.append(student)
-    elif all_students:
-        if not submissions_dir.is_dir():
-            console.print(f"[bold red]No existe el directorio de entregas: {submissions_dir}[/bold red]")
-            raise typer.Exit(code=1)
-        target_students = [
-            d.name for d in sorted(submissions_dir.iterdir())
-            if d.is_dir() and not d.name.startswith(".") and d.name not in ("guia", "guide", "templates", "informe")
-        ]
-    else:
-        console.print("[bold red]Debe especificar un estudiante o usar --all.[/bold red]")
-        raise typer.Exit(code=1)
-
-    if dry_run and len(target_students) > 3:
-        console.print(f"[bold yellow]⚡ Modo Dry Run activado: limitando evaluación a las primeras 3 entregas de {len(target_students)}.[/bold yellow]")
-        target_students = target_students[:3]
-
-    if not target_students:
-        console.print(f"[yellow]No se encontraron carpetas de estudiantes dentro de: {submissions_dir}[/yellow]")
-        return
-
-    if guide and guide.exercises:
-        console.print(f"[bold green]✓ Guía Deckard conectada ('{guide.nombre}'): {len(guide.exercises)} ejercicio(s) ({', '.join(guide.get_exercise_ids())}) | Modo: {effective_tipo}[/bold green]")
-    else:
-        console.print(f"[bold blue]Modo de construcción activo: {effective_tipo}[/bold blue]")
-
-    table = Table(title=f"Evaluación Dredd — {exercise_slug}")
-    table.add_column("Estudiante", style="cyan", justify="left")
-    table.add_column("Compilación", justify="center")
-    table.add_column("Tests", justify="center")
-    table.add_column("Reglas P1 / AST", justify="center")
-    table.add_column("Informe", style="green")
-
-    for s_name in target_students:
-        console.print(f"[bold]Procesando estudiante:[/bold] [cyan]{s_name}[/cyan]...")
-
-        try:
-            repo_path = ensure_submission_repo(org, exercise_slug, s_name, workspace_dir, submissions_dir=submissions_dir)
-        except Exception as e:
-            console.print(f"  [red]Error al obtener repositorio:[/red] {e}")
-            table.add_row(s_name, "[red]ERROR[/red]", "—", "—", "No generado")
-            continue
-
-        from dredd.core.reformat import reformat_submission_to_rn_f, find_existing_revision_folders
-        reformat_submission_to_rn_f(repo_path)
-        all_revs = find_existing_revision_folders(repo_path)
-        if not all_revs:
-            all_revs = [(1, repo_path)]
-
-        for rev_num, r_path in all_revs:
-            rev_str = f"r{rev_num}"
-            meta = get_repo_metadata(r_path)
-            analysis = run_ripley_analysis(
-                r_path,
-                guide=guide,
-                activity_slug=exercise_slug,
-                workspace_dir=workspace_dir,
-                tipo_entrega=effective_tipo,
-            )
-
-            report_file = repo_path / f"{s_name}_{rev_str}.md"
-            generate_student_report(
-                exercise=exercise_slug,
-                student=s_name,
-                repo_path=r_path,
-                metadata=meta,
-                analysis=analysis,
-                template_dir=template_dir,
-                output_file=report_file,
-                revision=rev_str,
-                guide=guide,
-            )
-
-            comp_ok = analysis.get("compilation", {}).get("success", False)
-            comp_str = "[green]OK[/green]" if comp_ok else "[red]FALLÓ[/red]"
-
-            tests_info = analysis.get("tests", {})
-            tests_str = f"{tests_info.get('passed', 0)}/{tests_info.get('total', 0)}" if tests_info.get("total", 0) > 0 else "N/A"
-
-            ast_count = len(analysis.get("ast_findings", []))
-            ast_str = f"[yellow]{ast_count} obs[/yellow]" if ast_count > 0 else "[green]0 obs[/green]"
-
-            try:
-                display_path = str(report_file.relative_to(workspace_dir))
-            except ValueError:
-                display_path = str(report_file)
-
-            student_label = f"{s_name} [{rev_str}]" if len(all_revs) > 1 else s_name
-            table.add_row(student_label, comp_str, tests_str, ast_str, display_path)
-
-    console.print("\n")
-    console.print(table)
-    console.print("\n[dim]Para enviar los comentarios a los PRs correspondientes, ejecute: dredd comment <ejercicio> <estudiante>[/dim]\n")
+    ejecutar_evaluacion(
+        exercise=exercise,
+        student=student,
+        org=org,
+        all_students=all_students,
+        template_dir=template_dir,
+        tipo_entrega=tipo_entrega,
+        dry_run=dry_run,
+    )
 
 
 def ejecutar_limpieza_evaluaciones(
@@ -345,7 +402,7 @@ def cmd_evaluate_run(
     ),
 ) -> None:
     """Clona/actualiza el repositorio o evalúa entregas locales, ejecuta el análisis con Ripley y genera el informe Markdown."""
-    cmd_eval(
+    ejecutar_evaluacion(
         exercise=exercise,
         student=student,
         org=org,
@@ -973,7 +1030,20 @@ def cmd_doctor() -> None:
 @app.command("rerun")
 def cmd_rerun(
     exercise: str = typer.Argument(..., help="Nombre de la actividad / ejercicio a re-evaluar."),
+    student: Optional[str] = typer.Argument(None, help="Nombre de usuario del estudiante específico a re-evaluar (opcional)."),
     failed_only: bool = typer.Option(True, "--failed-only/--all-rerun", help="Re-evaluar únicamente entregas desaprobadas o con fallos de compilación."),
+    tipo_entrega: Optional[str] = typer.Option(
+        None,
+        "--tipo-entrega",
+        "--build-mode",
+        "-m",
+        help="Tipo de entrega / modo de construcción ('archivos_individuales' vs 'makefile' vs 'proyecto' / 'libreria').",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Modo Dry Run: evalúa únicamente una muestra de hasta 3 estudiantes representativos.",
+    ),
     workspace: Path = typer.Option(Path("."), "--workspace", "-w", help="Directorio raíz del workspace."),
 ) -> None:
     """Re-ejecuta la evaluación sobre entregas desaprobadas o con observaciones críticas."""
@@ -984,8 +1054,15 @@ def cmd_rerun(
         raise typer.Exit(code=1)
 
     console.print(f"[bold cyan]🔄 Re-evaluando entregas ({'solo fallidas' if failed_only else 'todas'}) para '{exercise_slug}'...[/bold cyan]")
-    # Reinvocar cmd_eval con all_students=True
-    cmd_eval(exercise=exercise_slug, student=None, all_students=True)
+    ejecutar_evaluacion(
+        exercise=exercise_slug,
+        student=student,
+        all_students=(student is None),
+        tipo_entrega=tipo_entrega,
+        dry_run=dry_run,
+        failed_only=failed_only,
+        workspace_dir=workspace,
+    )
 
 
 @app.command("export-guarani")
