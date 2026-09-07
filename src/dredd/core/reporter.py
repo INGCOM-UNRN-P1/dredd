@@ -2,7 +2,7 @@
 
 from pathlib import Path
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from dredd.core.git_ops import RepoMetadata
 
 
@@ -334,6 +334,11 @@ def write_individual_tool_reports(
         comp_lines.append("\n```text")
         comp_lines.append(comp["raw_stderr"][:1200])
         comp_lines.append("```")
+
+    m_rev = re.search(r"\d+", rni_dir.name)
+    r_tag = f"r{m_rev.group(0)}" if m_rev else "r1"
+    comp_lines.append(f"\n> 📄 **Salida completa de compilación:** registrada en `compilacion_{r_tag}.log`.")
+
     daed_path = rni_dir / "daedalus.md"
     daed_path.write_text("\n".join(comp_lines) + "\n", encoding="utf-8")
     generated["daedalus"] = daed_path
@@ -617,7 +622,142 @@ def generate_consolidated_report_from_rni(
     report_content = "\n".join(lines) + "\n"
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text(report_content, encoding="utf-8")
+
+    # Si existe log de compilación en rNi y aún no en output_file.parent, sincronizar
+    m_num = re.search(r"\d+", revision or "")
+    rev_tag = f"r{m_num.group(0)}" if m_num else "r1"
+    src_log = rni_dir / f"compilacion_{rev_tag}.log"
+    dst_log = output_file.parent / f"compilacion_{rev_tag}.log"
+    if src_log.is_file() and not dst_log.exists():
+        import shutil
+        shutil.copy2(src_log, dst_log)
+
     return report_content
+
+
+def build_full_compilation_log(
+    analysis: Dict[str, Any],
+    revision: str,
+    student: Optional[str] = None,
+    exercise: Optional[str] = None,
+) -> str:
+    """Construye el texto de la salida completa de la compilación."""
+    comp = analysis.get("compilation", {})
+    compiler_used = comp.get("compiler_used", "gcc").upper()
+    success = comp.get("success", False)
+    estado_str = "EXITOSA" if success else "FALLÓ"
+
+    lines = [
+        "=" * 80,
+        "DREDD - SALIDA COMPLETA DE COMPILACIÓN",
+        f"Actividad: {exercise or 'N/A'}",
+        f"Estudiante: {student or 'N/A'}",
+        f"Revisión: {revision}",
+        f"Compilador / Modo: {compiler_used}",
+        f"Estado general: {estado_str}",
+        "=" * 80,
+        "",
+    ]
+
+    files_comp = comp.get("files", {})
+    if files_comp:
+        lines.append("### COMPILACIÓN POR ARCHIVO FUENTE ###\n")
+        for f_name, f_data in sorted(files_comp.items()):
+            f_ok = f_data.get("success", False)
+            f_st = "OK" if f_ok else "ERROR"
+            cu = f_data.get("compiler_used", "gcc").upper()
+            ret = f_data.get("returncode", 0 if f_ok else 1)
+            lines.append(f"--- Archivo: {f_name} | Estado: {f_st} | Compilador: {cu} | Código Retorno: {ret} ---")
+            cmd = f_data.get("command")
+            if cmd:
+                lines.append(f"$ {' '.join(str(c) for c in cmd)}")
+
+            raw_out = f_data.get("full_output") or f_data.get("raw_stderr") or ""
+            if not raw_out.strip() and f_ok:
+                raw_out = "Compilación exitosa sin advertencias ni mensajes de error."
+            lines.append(raw_out.strip())
+            lines.append("")
+
+    elif comp.get("full_output"):
+        lines.append("### SALIDA COMPLETA DE COMPILACIÓN / BUILD ###\n")
+        lines.append(comp["full_output"].strip())
+        lines.append("")
+    elif comp.get("raw_stderr"):
+        lines.append("### SALIDA ESTÁNDAR DE ERROR (STDERR) ###\n")
+        lines.append(comp["raw_stderr"].strip())
+        lines.append("")
+    else:
+        if success:
+            lines.append("Compilación exitosa sin advertencias ni mensajes de error.")
+        else:
+            lines.append("Falló la compilación pero no se registraron mensajes de salida.")
+        lines.append("")
+
+    diags = comp.get("translated_diagnostics", [])
+    if diags:
+        lines.append("-" * 80)
+        lines.append("### DIAGNÓSTICOS DEL COMPILADOR TRADUCIDOS (DAEDALUS / ESPER) ###")
+        lines.append("-" * 80)
+        for idx, d in enumerate(diags, 1):
+            f = d.get("file", "desconocido")
+            line = d.get("line", 1)
+            sev = d.get("severity", "ERROR")
+            msg = d.get("translated_message", d.get("raw_message", ""))
+            sug = d.get("suggestion", "")
+            lines.append(f"[{idx}] {f}:{line} [{sev}] {msg}")
+            if sug:
+                lines.append(f"    Sugerencia: {sug}")
+            if d.get("code_snippet"):
+                lines.append(f"    Código: {d['code_snippet']}")
+        lines.append("")
+
+    lines.append("=" * 80)
+    lines.append("FIN DE LA SALIDA DE COMPILACIÓN\n")
+    return "\n".join(lines)
+
+
+def save_compilation_log(
+    output_dir: Path,
+    analysis: Dict[str, Any],
+    revision: str,
+    student: Optional[str] = None,
+    exercise: Optional[str] = None,
+    output_stem: Optional[str] = None,
+) -> List[Path]:
+    """Guarda la salida completa de la compilación en output_dir con número de revisión."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rev_str = revision if str(revision).startswith("r") else f"r{revision}"
+    log_content = build_full_compilation_log(
+        analysis=analysis,
+        revision=rev_str,
+        student=student,
+        exercise=exercise,
+    )
+
+    saved_paths: List[Path] = []
+
+    # 1. Nombre canónico: compilacion_<revision>.log (ej: compilacion_r1.log)
+    canonical_file = output_dir / f"compilacion_{rev_str}.log"
+    canonical_file.write_text(log_content, encoding="utf-8")
+    saved_paths.append(canonical_file)
+
+    # 2. Nombre con slug del estudiante si se dispone (ej: alvarez_juan_r1_compilacion.log)
+    if student and str(student) != "None":
+        clean_stud = Path(student).name
+        student_file = output_dir / f"{clean_stud}_{rev_str}_compilacion.log"
+        if student_file != canonical_file:
+            student_file.write_text(log_content, encoding="utf-8")
+            saved_paths.append(student_file)
+
+    # 3. Si output_stem difiere (ej: informe_r1_compilacion.log)
+    if output_stem:
+        stem_clean = re.sub(r"_r\d+$", "", output_stem, flags=re.IGNORECASE)
+        stem_file = output_dir / f"{stem_clean}_{rev_str}_compilacion.log"
+        if stem_file not in saved_paths:
+            stem_file.write_text(log_content, encoding="utf-8")
+            saved_paths.append(stem_file)
+
+    return saved_paths
 
 
 def generate_student_report(
@@ -636,13 +776,33 @@ def generate_student_report(
     rev_str = revision or resolve_submission_revision(repo_path, student)
     m_num = re.search(r"\d+", rev_str)
     rev_num = m_num.group(0) if m_num else "1"
+    rev_tag = f"r{rev_num}"
 
     rni_dir = student_dir / f"r{rev_num}i"
 
-    # 1. Escribir informes individuales de cada herramienta en rNi/
+    # 1. Guardar la salida completa de la compilación en la misma ubicación que el informe
+    save_compilation_log(
+        output_dir=output_file.parent,
+        analysis=analysis,
+        revision=rev_tag,
+        student=student,
+        exercise=exercise,
+        output_stem=output_file.stem,
+    )
+
+    # También guardar una copia en el directorio modular rNi
+    save_compilation_log(
+        output_dir=rni_dir,
+        analysis=analysis,
+        revision=rev_tag,
+        student=student,
+        exercise=exercise,
+    )
+
+    # 2. Escribir informes individuales de cada herramienta en rNi/
     write_individual_tool_reports(rni_dir, analysis, metadata=metadata, guide=guide)
 
-    # 2. Generar informe consolidado a partir de rNi/
+    # 3. Generar informe consolidado a partir de rNi/
     return generate_consolidated_report_from_rni(
         rni_dir=rni_dir,
         exercise=exercise,

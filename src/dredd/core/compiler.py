@@ -14,8 +14,12 @@ class CompilationResult:
     success: bool
     output_bin: Optional[Path] = None
     raw_stderr: str = ""
+    raw_stdout: str = ""
+    full_output: str = ""
     translated_diagnostics: List[Dict[str, Any]] = field(default_factory=list)
     compiler_used: str = "gcc"
+    command: List[str] = field(default_factory=list)
+    returncode: int = 0
 
 
 def _try_import_esper():
@@ -64,12 +68,21 @@ def compile_with_esper(
                     "code_snippet": d.code_snippet,
                 })
 
+            cmd_list = getattr(report, "command", ["gcc"] + args)
+            ret_code = getattr(report, "exit_code", 0 if report.passed else 1)
+            raw_err = getattr(report, "raw_stderr", "") or ""
+            raw_out = getattr(report, "raw_stdout", "") or ""
+            full_out = f"{raw_out}\n{raw_err}".strip() if (raw_out and raw_err) else (raw_err or raw_out)
             return CompilationResult(
                 success=report.passed,
                 output_bin=output_bin if report.passed and output_bin else None,
-                raw_stderr=report.raw_stderr,
+                raw_stderr=raw_err,
+                raw_stdout=raw_out,
+                full_output=full_out,
                 translated_diagnostics=diags,
                 compiler_used="esper",
+                command=cmd_list,
+                returncode=ret_code,
             )
         except Exception:
             pass
@@ -99,12 +112,17 @@ def compile_with_esper(
                         "code_snippet": d.get("code_snippet"),
                     })
                 passed = data.get("passed", proc.returncode == 0)
+                raw_err = data.get("raw_stderr", proc.stderr)
                 return CompilationResult(
                     success=passed,
                     output_bin=output_bin if passed and output_bin else None,
-                    raw_stderr=data.get("raw_stderr", proc.stderr),
+                    raw_stderr=raw_err,
+                    raw_stdout=proc.stdout,
+                    full_output=raw_err or proc.stderr,
                     translated_diagnostics=diags,
                     compiler_used="esper",
+                    command=cmd,
+                    returncode=proc.returncode,
                 )
         except Exception:
             pass
@@ -127,12 +145,23 @@ def compile_with_gcc(
     cmd = [gcc] + flags + [str(f) for f in c_files] + ["-o", out_target]
 
     proc = subprocess.run(cmd, capture_output=True, text=True)
+    out_parts = []
+    if proc.stdout and proc.stdout.strip():
+        out_parts.append(proc.stdout.strip())
+    if proc.stderr and proc.stderr.strip():
+        out_parts.append(proc.stderr.strip())
+    full_out = "\n".join(out_parts)
+
     return CompilationResult(
         success=(proc.returncode == 0),
         output_bin=output_bin if (proc.returncode == 0 and output_bin) else None,
         raw_stderr=proc.stderr,
+        raw_stdout=proc.stdout,
+        full_output=full_out,
         translated_diagnostics=[],
         compiler_used="gcc",
+        command=cmd,
+        returncode=proc.returncode,
     )
 
 
@@ -146,7 +175,9 @@ def compile_c_sources(
         return CompilationResult(
             success=False,
             raw_stderr="No se encontraron archivos .c para compilar.",
+            full_output="No se encontraron archivos .c para compilar.",
             compiler_used="none",
+            returncode=1,
         )
 
     # 1. Intentar compilar con ESPER
@@ -162,7 +193,9 @@ def compile_c_sources(
     return CompilationResult(
         success=False,
         raw_stderr="Ni ESPER ni GCC se encuentran disponibles en el sistema.",
+        full_output="Ni ESPER ni GCC se encuentran disponibles en el sistema.",
         compiler_used="none",
+        returncode=1,
     )
 
 
@@ -178,7 +211,9 @@ def compile_with_make(
         return CompilationResult(
             success=False,
             raw_stderr="La herramienta 'make' no se encuentra disponible en el sistema.",
+            full_output="La herramienta 'make' no se encuentra disponible en el sistema.",
             compiler_used="make",
+            returncode=1,
         )
 
     makefile = build_dir / "Makefile"
@@ -187,7 +222,9 @@ def compile_with_make(
         return CompilationResult(
             success=False,
             raw_stderr=f"No se encontró un archivo Makefile en '{build_dir}'.",
+            full_output=f"No se encontró un archivo Makefile en '{build_dir}'.",
             compiler_used="make",
+            returncode=1,
         )
 
     cmd = [make, "-C", str(build_dir)]
@@ -205,21 +242,35 @@ def compile_with_make(
             # Buscar binarios ejecutables generados
             import os
             for f in build_dir.iterdir():
-                if f.is_file() and not f.name.endswith((".c", ".h", ".o", ".in", ".out", ".md", ".txt", ".yaml", ".json", ".db")):
+                if f.is_file() and not f.name.endswith((".c", ".h", ".o", ".in", ".out", ".md", ".txt", ".yaml", ".json", ".db", ".log")):
                     if os.access(f, os.X_OK):
                         bin_found = f
                         break
+
+        out_parts = []
+        if proc.stdout and proc.stdout.strip():
+            out_parts.append(proc.stdout.strip())
+        if proc.stderr and proc.stderr.strip():
+            out_parts.append(proc.stderr.strip())
+        full_out = "\n".join(out_parts)
 
         return CompilationResult(
             success=(proc.returncode == 0),
             output_bin=bin_found,
             raw_stderr=proc.stderr,
+            raw_stdout=proc.stdout,
+            full_output=full_out,
             translated_diagnostics=[],
             compiler_used="make",
+            command=cmd,
+            returncode=proc.returncode,
         )
     except Exception as e:
         return CompilationResult(
             success=False,
             raw_stderr=f"Error durante la ejecución de make: {e}",
+            full_output=f"Error durante la ejecución de make: {e}",
             compiler_used="make",
+            command=cmd,
+            returncode=1,
         )

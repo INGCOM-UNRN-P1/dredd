@@ -12,9 +12,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 # Carpetas de revisiones internas generadas por las herramientas (r1i, r2i, r10i, etc.)
 PATRON_DIR_RNI = re.compile(r"^r\d+i$", re.IGNORECASE)
 
-# Informes consolidados y exportaciones generadas por Dredd
+# Informes consolidados, logs de compilación y exportaciones generadas por Dredd
 PATRON_ARCHIVO_INFORME = re.compile(
-    r"^(?:.+_r\d+|informe(?:_.*)?|alumno_r\d+.*|feedback_.*|devolucion_.*)\.(?:md|html|pdf)$",
+    r"^(?:.+_r\d+.*|informe(?:_.*)?|alumno_r\d+.*|feedback_.*|devolucion_.*|compilacion_r\d+.*|compile_r\d+.*)\.(?:md|html|pdf|log|txt)$",
     re.IGNORECASE,
 )
 

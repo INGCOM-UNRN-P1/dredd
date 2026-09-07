@@ -485,6 +485,10 @@ def run_ripley_analysis(
 
         if makefile_results:
             all_passed = all(m.clean_ok and m.test_ok for m in makefile_results)
+            full_make_log = "\n\n".join(
+                f"=== Ejercicio: {m.exercise_name} (clean: {m.clean_ok}, test: {m.test_ok}) ===\n{m.output_log}"
+                for m in makefile_results
+            )
             res_dict = {
                 "version": "2.0.0",
                 "compilation": {
@@ -492,6 +496,7 @@ def run_ripley_analysis(
                     "raw_stderr": "\n".join(
                         m.output_log for m in makefile_results
                     ),
+                    "full_output": full_make_log,
                     "translated_diagnostics": [],
                     "compiler_used": "makefiles_individuales",
                 },
@@ -523,6 +528,8 @@ def run_ripley_analysis(
                 "compilation": {
                     "success": comp_make.success,
                     "raw_stderr": comp_make.raw_stderr,
+                    "raw_stdout": getattr(comp_make, "raw_stdout", ""),
+                    "full_output": getattr(comp_make, "full_output", comp_make.raw_stderr),
                     "translated_diagnostics": comp_make.translated_diagnostics,
                     "compiler_used": "makefile",
                 },
@@ -536,6 +543,7 @@ def run_ripley_analysis(
                 "compilation": {
                     "success": False,
                     "raw_stderr": "No se encontraron sub-Makefiles de ejercicios ni Makefile raíz.",
+                    "full_output": "No se encontraron sub-Makefiles de ejercicios ni Makefile raíz.",
                     "compiler_used": "makefiles_individuales",
                 },
                 "ast_findings": ast_findings,
@@ -578,11 +586,14 @@ def run_ripley_analysis(
         except Exception:
             pass
 
+        full_proj_log = getattr(comp_make, "full_output", comp_make.raw_stderr)
         res_dict = {
             "version": "2.0.0",
             "compilation": {
                 "success": comp_make.success and test_ok,
                 "raw_stderr": comp_make.raw_stderr,
+                "raw_stdout": getattr(comp_make, "raw_stdout", ""),
+                "full_output": full_proj_log,
                 "translated_diagnostics": comp_make.translated_diagnostics,
                 "compiler_used": "make_proyecto",
             },
@@ -659,6 +670,7 @@ def run_ripley_analysis(
                 file_compilations = {}
                 all_diags = []
                 all_stderrs = []
+                all_full_outputs = []
                 files_comp_ok = True
 
                 import tempfile
@@ -668,19 +680,28 @@ def run_ripley_analysis(
                     for idx, c_f in enumerate(c_files):
                         tmp_bin = tmp_dir / f"bin_eval_{idx}"
                         comp_f = compile_c_sources([c_f], output_bin=tmp_bin)
+                        f_full = getattr(comp_f, "full_output", comp_f.raw_stderr) or comp_f.raw_stderr
                         file_compilations[c_f.name] = {
                             "success": comp_f.success,
                             "raw_stderr": comp_f.raw_stderr,
+                            "raw_stdout": getattr(comp_f, "raw_stdout", ""),
+                            "full_output": f_full,
                             "translated_diagnostics": (
                                 comp_f.translated_diagnostics
                             ),
                             "compiler_used": comp_f.compiler_used,
+                            "command": getattr(comp_f, "command", []),
+                            "returncode": getattr(comp_f, "returncode", 0 if comp_f.success else 1),
                         }
                         if not comp_f.success:
                             files_comp_ok = False
                             all_stderrs.append(
                                 f"[{c_f.name}]:\n{comp_f.raw_stderr}"
                             )
+                        if f_full.strip():
+                            all_full_outputs.append(f"=== {c_f.name} ===\n{f_full.strip()}")
+                        else:
+                            all_full_outputs.append(f"=== {c_f.name} ===\nCompilación exitosa (sin advertencias ni errores).")
                         all_diags.extend(comp_f.translated_diagnostics)
 
                 res_dict = {
@@ -688,6 +709,7 @@ def run_ripley_analysis(
                     "compilation": {
                         "success": files_comp_ok,
                         "raw_stderr": "\n\n".join(all_stderrs),
+                        "full_output": "\n\n".join(all_full_outputs),
                         "translated_diagnostics": all_diags,
                         "compiler_used": checks.daedalus_compiler,
                         "files": file_compilations,
