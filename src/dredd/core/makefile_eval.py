@@ -75,6 +75,28 @@ def evaluate_makefile_exercises(repo_path: Path, timeout_sec: int = 60) -> List[
         except Exception:
             check_ok = True  # Opcional si no tiene target check
 
+        # 4. make clean posterior para evitar dejar binarios en el árbol del estudiante
+        try:
+            subprocess.run(
+                ["make", "-C", str(ex_dir), "clean"],
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
+            )
+        except Exception:
+            pass
+
+        # Barrido de seguridad: eliminar cualquier binario residual generado durante make
+        try:
+            from dredd.core.binary_check import is_binary_file
+            for p in list(ex_dir.rglob("*")):
+                if p.is_file():
+                    is_bin, _ = is_binary_file(p.name, p.read_bytes()[:1024])
+                    if is_bin:
+                        p.unlink(missing_ok=True)
+        except Exception:
+            pass
+
         results.append(
             ExerciseEvalResult(
                 exercise_name=ex_dir.name,
@@ -85,7 +107,9 @@ def evaluate_makefile_exercises(repo_path: Path, timeout_sec: int = 60) -> List[
             )
         )
 
-    # Limpiar modificaciones
-    subprocess.run(["git", "-C", str(repo_path), "reset", "--hard", "HEAD"], capture_output=True)
+    # Limpiar modificaciones si es repositorio Git
+    if (repo_path / ".git").is_dir():
+        subprocess.run(["git", "-C", str(repo_path), "reset", "--hard", "HEAD"], capture_output=True)
+        subprocess.run(["git", "-C", str(repo_path), "clean", "-fd"], capture_output=True)
 
     return results

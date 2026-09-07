@@ -368,6 +368,20 @@ def run_ripley_analysis(
     checks_override: Optional[Any] = None,
     tipo_entrega: Optional[str] = None,
 ) -> Dict[str, Any]:
+    if guide is None:
+        from dredd.core.guide_integration import (
+            load_activity_guide,
+            load_guide_from_deckard_dir,
+        )
+        cand_deck = target_path / ".deckard"
+        if not cand_deck.is_dir():
+            cand_deck = target_path.parent / ".deckard"
+        if cand_deck.is_dir():
+            guide = load_guide_from_deckard_dir(cand_deck)
+        if guide is None:
+            slug = activity_slug or target_path.name
+            guide = load_activity_guide(target_path, slug, workspace_dir)
+
     from dredd.core.config import load_dredd_config, ToolChecksConfig
 
     cfg = load_dredd_config(workspace_dir or target_path)
@@ -399,21 +413,60 @@ def run_ripley_analysis(
     )
     effective_mode = normalize_delivery_mode(raw_mode)
 
+    # 0. Auditar y purgar archivos binarios presentes en el directorio de trabajo
+    import re
+    from dredd.core.binary_check import audit_and_purge_binaries_from_dir
+    binary_findings = audit_and_purge_binaries_from_dir(target_path)
+
+    # Recuperar binarios detectados y filtrados durante la ingesta Moodle
+    from dredd.core.db import DatabaseManager
+    slug_cand = target_path.name if not re.match(r"^r\d+", target_path.name) else target_path.parent.name
+    for db_cand in [target_path / ".metadata.db", target_path.parent / ".metadata.db"]:
+        if db_cand.is_file():
+            try:
+                db = DatabaseManager(db_cand)
+                rev = db.get_latest_revision(slug_cand)
+                if rev:
+                    ign_rows = db.get_ignored_files(rev["id"])
+                    for row in ign_rows:
+                        reason = row["reason"] or ""
+                        if "ERROR_BINARY" in reason:
+                            fname = row["filename"]
+                            if not any(f["file"] == fname for f in binary_findings):
+                                binary_findings.append({
+                                    "rule_code": "0x000Fh",
+                                    "rule_id": "P1_BINARY_PROHIBITED",
+                                    "rule_name": "[SEGURIDAD] Archivo binario no permitido en entrega",
+                                    "file": fname,
+                                    "line": 1,
+                                    "severity": "ERROR",
+                                    "message": (
+                                        f"Se detectó y filtró el archivo binario prohibido '{fname}' ({reason}). "
+                                        "Las entregas deben contener exclusivamente código fuente editable y makefiles."
+                                    ),
+                                    "suggestion": (
+                                        "Eliminá todos los archivos binarios (.o, .a, .exe, etc.) antes de entregar. "
+                                        "Ejecutá 'make clean' y agregalos a tu .gitignore."
+                                    ),
+                                })
+            except Exception:
+                pass
+
     def _collect_ast_findings() -> List[Dict[str, Any]]:
+        findings = []
         if checks.ripley_enabled:
             try:
                 from ripley.core.engine import analyze_target
 
                 res = analyze_target(target_path)
-                return res.to_dict().get("ast_findings", [])
+                findings.extend(res.to_dict().get("ast_findings", []))
             except Exception:
                 pass
-        from dredd.core.ast_checker import audit_c_file
-
-        findings = []
-        for cf in sorted(target_path.glob("**/*.c")):
-            if not any(part.startswith(".") for part in cf.parts):
-                findings.extend(audit_c_file(cf))
+        if not findings:
+            from dredd.core.ast_checker import audit_c_file
+            for cf in sorted(target_path.glob("**/*.c")):
+                if not any(part.startswith(".") for part in cf.parts):
+                    findings.extend(audit_c_file(cf))
         return findings
 
     res_dict = None
@@ -754,6 +807,11 @@ def run_ripley_analysis(
         style_findings, style_metrics = audit_style_with_gaff(target_path, checks=checks)
         res_dict["style_findings"] = style_findings
         res_dict["style_metrics"] = style_metrics
+
+    # 9. Inyección de hallazgos de binarios prohibidos
+    res_dict["binary_findings"] = binary_findings
+    if binary_findings:
+        res_dict["ast_findings"] = binary_findings + res_dict.get("ast_findings", [])
 
     return res_dict
 

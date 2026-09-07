@@ -71,22 +71,73 @@ def _get_common_root_prefix(names: List[str]) -> str:
     return prefix
 
 
-def extract_archive_payload(raw_bytes: bytes) -> List[Tuple[str, bytes]]:
-    """Extrae archivos permitidos de un ZIP o TAR en memoria normalizando barras y jerarquías."""
-    extracted: List[Tuple[str, bytes]] = []
+def extract_archive_payload(
+    raw_bytes: bytes,
+    binary_collector: Optional[List[Tuple[str, str]]] = None,
+    base_prefix: str = "",
+    depth: int = 0,
+) -> List[Tuple[str, bytes]]:
+    """Extrae archivos permitidos de un ZIP o TAR en memoria normalizando barras, jerarquías y descomprimiendo recursivamente."""
+    if depth > 10:
+        return []
+
+    from dredd.core.binary_check import is_binary_file
+
+    raw_files: Dict[str, bytes] = {}
 
     # 1. Probar como ZIP
     if zipfile.is_zipfile(io.BytesIO(raw_bytes)):
-        with zipfile.ZipFile(io.BytesIO(raw_bytes)) as z:
-            names = [n.replace("\\", "/") for n in z.namelist() if not n.replace("\\", "/").endswith("/")]
-            strip_prefix = _get_common_root_prefix(names)
-            for orig_name, n in zip(z.namelist(), names):
-                if n.endswith("/"):
-                    continue
-                rel = n[len(strip_prefix):] if strip_prefix and n.startswith(strip_prefix) else n
-                if is_allowed_file(rel):
-                    extracted.append((rel, z.read(orig_name)))
-        return extracted
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw_bytes)) as z:
+                entry_map: List[Tuple[str, str]] = []
+                for orig_name in z.namelist():
+                    norm_name = orig_name.replace("\\", "/")
+                    if not norm_name.endswith("/"):
+                        entry_map.append((orig_name, norm_name))
+
+                names = [norm_name for _, norm_name in entry_map]
+                strip_prefix = _get_common_root_prefix(names)
+
+                for orig_name, norm_name in entry_map:
+                    rel = (
+                        norm_name[len(strip_prefix):]
+                        if strip_prefix and norm_name.startswith(strip_prefix)
+                        else norm_name
+                    )
+                    full_rel = f"{base_prefix}/{rel}".strip("/") if base_prefix else rel.strip("/")
+
+                    if is_ignored(full_rel):
+                        continue
+
+                    try:
+                        file_bytes = z.read(orig_name)
+                    except Exception:
+                        continue
+
+                    ext = Path(full_rel).suffix.lower()
+                    if ext in (".zip", ".tar", ".gz", ".tgz") or zipfile.is_zipfile(io.BytesIO(file_bytes[:1024])):
+                        inner_base = str(Path(full_rel).parent)
+                        if inner_base == ".":
+                            inner_base = ""
+                        nested_res = extract_archive_payload(
+                            file_bytes,
+                            binary_collector=binary_collector,
+                            base_prefix=inner_base,
+                            depth=depth + 1,
+                        )
+                        for n_path, n_bytes in nested_res:
+                            raw_files[n_path] = n_bytes
+                    else:
+                        is_bin, bin_reason = is_binary_file(full_rel, file_bytes[:1024])
+                        if is_bin:
+                            if binary_collector is not None:
+                                binary_collector.append((full_rel, bin_reason))
+                            continue
+                        if is_allowed_file(full_rel):
+                            raw_files[full_rel] = file_bytes
+            return list(raw_files.items())
+        except Exception:
+            pass
 
     # 2. Fallback: Probar como TAR (caso Iriarte)
     try:
@@ -95,17 +146,48 @@ def extract_archive_payload(raw_bytes: bytes) -> List[Tuple[str, bytes]]:
                 members = [m for m in tf.getmembers() if m.isfile()]
                 names = [m.name.replace("\\", "/") for m in members]
                 strip_prefix = _get_common_root_prefix(names)
-                for m, n in zip(members, names):
-                    rel = n[len(strip_prefix):] if strip_prefix and n.startswith(strip_prefix) else n
-                    if is_allowed_file(rel):
-                        f = tf.extractfile(m)
-                        if f:
-                            extracted.append((rel, f.read()))
-            return extracted
+                for m, norm_name in zip(members, names):
+                    rel = (
+                        norm_name[len(strip_prefix):]
+                        if strip_prefix and norm_name.startswith(strip_prefix)
+                        else norm_name
+                    )
+                    full_rel = f"{base_prefix}/{rel}".strip("/") if base_prefix else rel.strip("/")
+
+                    if is_ignored(full_rel):
+                        continue
+
+                    f = tf.extractfile(m)
+                    if not f:
+                        continue
+                    file_bytes = f.read()
+
+                    ext = Path(full_rel).suffix.lower()
+                    if ext in (".zip", ".tar", ".gz", ".tgz"):
+                        inner_base = str(Path(full_rel).parent)
+                        if inner_base == ".":
+                            inner_base = ""
+                        nested_res = extract_archive_payload(
+                            file_bytes,
+                            binary_collector=binary_collector,
+                            base_prefix=inner_base,
+                            depth=depth + 1,
+                        )
+                        for n_path, n_bytes in nested_res:
+                            raw_files[n_path] = n_bytes
+                    else:
+                        is_bin, bin_reason = is_binary_file(full_rel, file_bytes[:1024])
+                        if is_bin:
+                            if binary_collector is not None:
+                                binary_collector.append((full_rel, bin_reason))
+                            continue
+                        if is_allowed_file(full_rel):
+                            raw_files[full_rel] = file_bytes
+            return list(raw_files.items())
     except Exception:
         pass
 
-    return extracted
+    return list(raw_files.items())
 
 
 @dataclass
@@ -246,6 +328,7 @@ class MoodleIngestor:
         self,
         zip_path: str | Path,
         dry_run: bool = False,
+        force: bool = False,
     ) -> Tuple[ParsedMoodleZip, List[IngestionResult]]:
         zip_file_path = Path(zip_path)
         if not zip_file_path.exists():
@@ -292,15 +375,28 @@ class MoodleIngestor:
 
                 sources: List[ProcessedSourceFile] = []
                 ignored: List[IgnoredFileInfo] = []
+                binary_collector: List[Tuple[str, str]] = []
 
                 for fpath in file_paths:
                     filename = Path(fpath).name
                     ext = Path(filename).suffix.lower()
                     raw_content = zf.read(fpath)
 
+                    # Verificar si el archivo en sí es un binario directo
+                    from dredd.core.binary_check import is_binary_file
+                    is_bin, bin_reason = is_binary_file(filename, raw_content[:1024])
+                    if is_bin and ext not in (".zip", ".tar", ".gz", ".tgz"):
+                        ignored.append(
+                            IgnoredFileInfo(
+                                filename=filename,
+                                reason=f"ERROR_BINARY: {bin_reason}",
+                            )
+                        )
+                        continue
+
                     # Si es archivo comprimido (zip, tar, o bytes de zip/tar), extraer su contenido respetando jerarquías
                     if ext in (".zip", ".tar", ".gz", ".tgz") or zipfile.is_zipfile(io.BytesIO(raw_content)) or tarfile.is_tarfile(io.BytesIO(raw_content)):
-                        archived_files = extract_archive_payload(raw_content)
+                        archived_files = extract_archive_payload(raw_content, binary_collector=binary_collector)
                         if archived_files:
                             for rel_path, file_bytes in archived_files:
                                 text, _ = normalize_encoding(file_bytes)
@@ -314,7 +410,7 @@ class MoodleIngestor:
                                         size_bytes=len(utf8_bytes),
                                     )
                                 )
-                        else:
+                        elif not binary_collector:
                             ignored.append(
                                 IgnoredFileInfo(
                                     filename=filename,
@@ -341,11 +437,24 @@ class MoodleIngestor:
                             )
                         )
 
+                # Registrar los binarios filtrados del alumno para auditoría docente
+                for bin_file, bin_reason in binary_collector:
+                    ignored.append(
+                        IgnoredFileInfo(
+                            filename=bin_file,
+                            reason=f"ERROR_BINARY: {bin_reason}",
+                        )
+                    )
+
                 combined_hash = calculate_sources_hash(sources)
                 student_dir = activity_dir / parsed_student.student_slug
                 db_path = student_dir / ".metadata.db"
 
                 if not dry_run:
+                    if force and student_dir.exists():
+                        import shutil
+                        shutil.rmtree(student_dir, ignore_errors=True)
+
                     student_dir.mkdir(parents=True, exist_ok=True)
                     db = DatabaseManager(db_path)
                     db.upsert_student(

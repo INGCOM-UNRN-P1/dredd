@@ -215,6 +215,16 @@ class DatabaseManager:
             conn.commit()
             return rev_id
 
+    def get_ignored_files(self, revision_id: int) -> List[sqlite3.Row]:
+        """Obtiene la lista de archivos ignorados o rechazados para una revisión específica."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM ignored_files WHERE revision_id = ?",
+                (revision_id,),
+            )
+            return cursor.fetchall()
+
     def save_evaluation(
         self,
         revision_id: int,

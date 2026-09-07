@@ -211,6 +211,7 @@ def write_individual_tool_reports(
     tests = analysis.get("tests", {})
     cases = tests.get("cases", [])
     val = analysis.get("valgrind", {})
+    binary_findings = analysis.get("binary_findings", [])
 
     all_c_files = set(files_comp.keys())
     for f in ast_findings:
@@ -226,6 +227,10 @@ def write_individual_tool_reports(
     res_lines = ["## Resumen de Evaluación por Archivo\n"]
     res_lines.append("| Archivo | Estado Compilación | Evaluación de Estilo | Valgrind (Fugas) | Observaciones Cátedra |")
     res_lines.append("| :--- | :---: | :---: | :---: | :--- |")
+    if binary_findings:
+        res_lines.append(
+            f"| `[ARCHIVOS_BINARIOS]` | ❌ ERROR ({len(binary_findings)} filtrados) | 0.0/10 | — | Se detectaron binarios prohibidos (.o/.exe) en la entrega |"
+        )
     for f_name in sorted(all_c_files):
         # Compilación
         f_comp_ok = files_comp.get(f_name, {}).get("success", comp.get("success", True))
@@ -250,6 +255,53 @@ def write_individual_tool_reports(
     res_path = rni_dir / "resumen.md"
     res_path.write_text("\n".join(res_lines) + "\n", encoding="utf-8")
     generated["resumen"] = res_path
+
+    # 0.5. Auditoría de Archivos Binarios Prohibidos (binarios.md)
+    if binary_findings:
+        bin_lines = [
+            "## ⚠️ Archivos Binarios Prohibidos Filtrados\n",
+            "> ❌ **ERROR DE ENTREGA:** Se detectaron archivos binarios precompilados o ejecutables en la entrega del estudiante. ",
+            "> Para mantener la reproducibilidad académica y evitar la ejecución de código no compilado desde fuentes, estos archivos fueron **filtrados y descartados** de la evaluación.\n",
+            "| Archivo Binario | Regla | Severidad | Detalle del Error | Sugerencia |",
+            "| :--- | :---: | :---: | :--- | :--- |",
+        ]
+        for bf in binary_findings:
+            bin_lines.append(
+                f"| `{bf.get('file')}` | `{bf.get('rule_code', '0x000Fh')}` | **{bf.get('severity', 'ERROR')}** | {bf.get('message')} | {bf.get('suggestion')} |"
+            )
+        bin_lines.append(
+            "\n**Acción Requerida:** Las entregas deben contener exclusivamente código fuente editable (`.c`, `.h`), archivos de configuración (`Makefile`) y documentación (`.md`, `.txt`). Ejecutá `make clean` antes de comprimir tu entrega y verificá tu archivo `.gitignore`."
+        )
+        bin_path = rni_dir / "binarios.md"
+        bin_path.write_text("\n".join(bin_lines) + "\n", encoding="utf-8")
+        generated["binarios"] = bin_path
+
+    # 0.6. Enunciado y Consigna de la Actividad (enunciado.md)
+    if guide and (getattr(guide, "enunciado", "") or any(getattr(e, "enunciado", "") for e in getattr(guide, "exercises", []))):
+        enunc_lines = [
+            f"## 📋 Consigna y Enunciado — {guide.nombre}\n",
+        ]
+        if getattr(guide, "enunciado_source", None):
+            enunc_lines.append(f"> 📌 **Origen del enunciado:** `{guide.enunciado_source}`\n")
+        if getattr(guide, "enunciado", ""):
+            enunc_lines.append(guide.enunciado)
+            enunc_lines.append("\n---\n")
+
+        sub_enuncs = [e for e in getattr(guide, "exercises", []) if getattr(e, "enunciado", "")]
+        if sub_enuncs:
+            enunc_lines.append("### Requerimientos por Ejercicio\n")
+            for e in sub_enuncs:
+                enunc_lines.append(f"#### `{e.display_name}`\n")
+                enunc_lines.append(e.enunciado)
+                if getattr(e, "pistas", []):
+                    enunc_lines.append("\n**Pistas didácticas:**")
+                    for p in e.pistas:
+                        enunc_lines.append(f"- {p}")
+                enunc_lines.append("")
+
+        enunc_path = rni_dir / "enunciado.md"
+        enunc_path.write_text("\n".join(enunc_lines) + "\n", encoding="utf-8")
+        generated["enunciado"] = enunc_path
 
     # 1. Daedalus (Compilación)
     compiler_used = comp.get("compiler_used", "gcc").upper()
@@ -487,6 +539,8 @@ def generate_consolidated_report_from_rni(
     if guide and getattr(guide, "exercises", None):
         lines.append("\n## Especificación de la Guía")
         lines.append(f"**Guía vinculada:** `{guide.nombre}`")
+        if getattr(guide, "enunciado_source", None):
+            lines.append(f"**Origen de consigna:** `{guide.enunciado_source}`")
         ejs_str = ", ".join(f"`{e.display_name}`" for e in guide.exercises)
         lines.append(f"**Ejercicios requeridos:** {ejs_str}")
 
@@ -501,6 +555,8 @@ def generate_consolidated_report_from_rni(
     # 3. Incorporar informes modulares desde rNi en orden pedagógico
     priority_order = [
         "resumen.md",
+        "binarios.md",
+        "enunciado.md",
         "daedalus.md",
         "ripley.md",
         "tests.md",
@@ -611,15 +667,19 @@ def generate_personalized_feedback_markdown(
     comp = analysis.get("compilation", {})
     ast = analysis.get("ast_findings", [])
     tests = analysis.get("tests", {})
+    binaries = analysis.get("binary_findings", [])
 
     passed = (
         comp.get("success", False)
         and (tests.get("failed", 0) == 0)
         and not any(f.get("severity") in ("ERROR", "FATAL") for f in ast)
+        and not binaries
     )
 
     status_badge = "✅ **ENTREGA APROBADA**" if passed else "⚠️ **ENTREGA CON OBSERVACIONES / REQUIERE REVISIÓN**"
-    if not comp.get("success", False):
+    if binaries:
+        status_badge = "❌ **ENTREGA NO APROBADA (Archivos binarios prohibidos detectados)**"
+    elif not comp.get("success", False):
         status_badge = "❌ **ENTREGA NO APROBADA (Error de compilación)**"
 
     lines = [
@@ -635,6 +695,8 @@ def generate_personalized_feedback_markdown(
     val = analysis.get("valgrind", {})
     style = analysis.get("style_findings", [])
 
+    if binaries:
+        lines.append(f"- **Archivos Binarios (.o, .a, .exe):** ❌ Se detectaron **{len(binaries)}** archivo(s) binario(s) prohibido(s) que fueron filtrados.")
     lines.append(f"- **Compilación ({comp.get('compiler_used', 'GCC').upper()}):** {'✓ Exitosa' if comp.get('success') else '✖ Falló'}")
     lines.append(f"- **Reglas P1 / Calidad:** {len(ast)} observación(es) detectada(s)")
     lines.append(f"- **Estilo y Formato (Gaff):** {'✓ Conforme' if not style else f'⚠️ {len(style)} observación(es)'}")
@@ -647,6 +709,8 @@ def generate_personalized_feedback_markdown(
 
     # Acciones concretas sugeridas
     issues = []
+    if binaries:
+        issues.append(f"Eliminar los {len(binaries)} archivos binarios precompilados (.o, .a, .exe) del repositorio usando `make clean` y `.gitignore`.")
     if not comp.get("success"):
         issues.append("Corregir los errores de compilación antes de volver a entregar.")
     for d in comp.get("translated_diagnostics", []):

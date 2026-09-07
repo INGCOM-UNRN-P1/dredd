@@ -544,6 +544,7 @@ def cmd_map(
 def cmd_moodle_ingest(
     zip_file: Path = typer.Argument(..., help="Archivo ZIP descargado de Moodle con las entregas de la tarea."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Solo simular la extracción sin escribir en disco."),
+    force: bool = typer.Option(False, "--force", "-f", help="Re-ingestar sobrescribiendo revisiones previas."),
 ) -> None:
     """Descomprime, normaliza a UTF-8 y versiona (SHA-256) entregas masivas de Moodle."""
     from dredd.core.ingest import MoodleIngestor
@@ -552,8 +553,12 @@ def cmd_moodle_ingest(
         console.print(f"[bold red]Archivo ZIP inexistente: {zip_file}[/bold red]")
         raise typer.Exit(code=1)
 
-    ingestor = MoodleIngestor(Path.cwd())
-    info, results = ingestor.process_zip(zip_file, dry_run=dry_run)
+    workspace_dir = Path.cwd()
+    if not (workspace_dir / "dredd.yaml").exists() and (zip_file.parent / "dredd.yaml").exists():
+        workspace_dir = zip_file.parent
+
+    ingestor = MoodleIngestor(workspace_dir)
+    info, results = ingestor.process_zip(zip_file, dry_run=dry_run, force=force)
 
     new_revs = sum(1 for r in results if r.is_new_revision)
     console.print(f"\n[bold green]✓ Ingesta completada para '{info.activity_name}' ({info.activity_slug})[/bold green]")

@@ -284,6 +284,7 @@ class MappingRule:
     zip_pattern: str
     entrega: str
     guia: Optional[str] = None
+    practica: Optional[str] = None
     titulo: str = ""
     descripcion: str = ""
     plantilla: Optional[str] = None
@@ -315,6 +316,7 @@ class WorkspaceSettings:
     zips_dir: str = "zips"
     submissions_dir: str = "entregas"
     guias_dir: str = "guias"
+    practicas_dir: str = "practicas"
     plantillas_dir: str = "plantillas"
     default_org: str = "INGCOM-UNRN-P1"
     default_mode: str = "auto"
@@ -398,16 +400,22 @@ class DreddConfig:
         return None
 
     def get_guide_path(self, activity_slug: str, base_dir: Optional[Path] = None) -> Optional[Path]:
-        """Retorna la ruta resuelta hacia la guía de Deckard mapeada."""
+        """Retorna la ruta resuelta hacia la guía de Deckard o práctica mapeada."""
         base = base_dir or (self.config_path.parent if self.config_path else Path.cwd())
         rule = self.find_mapping_for_activity(activity_slug)
-        if rule and rule.guia:
-            cand = base / rule.guia
+        cand_str = (rule.guia or getattr(rule, "practica", None)) if rule else None
+        if cand_str:
+            cand = base / cand_str
             if cand.exists():
                 return cand
-            cand_alt = Path(rule.guia)
+            cand_alt = Path(cand_str)
             if cand_alt.exists():
                 return cand_alt
+        # Fallback a directorio practicas del workspace
+        if getattr(self.workspace, "practicas_dir", None):
+            cand_p = base / self.workspace.practicas_dir / activity_slug
+            if cand_p.exists():
+                return cand_p
         return None
 
     def get_effective_checks(self, activity_slug: Optional[str] = None) -> ToolChecksConfig:
@@ -502,6 +510,7 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
                         zips_dir=ws_raw.get("zips_dir", "zips"),
                         submissions_dir=ws_raw.get("submissions_dir", "entregas"),
                         guias_dir=ws_raw.get("guias_dir", "guias"),
+                        practicas_dir=ws_raw.get("practicas_dir", "practicas"),
                         plantillas_dir=ws_raw.get("plantillas_dir", "plantillas"),
                         default_org=ws_raw.get("default_org", "INGCOM-UNRN-P1"),
                         default_mode=ws_raw.get("default_mode", "auto"),
@@ -516,7 +525,8 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
                                 MappingRule(
                                     zip_pattern=m.get("zip_pattern", "*"),
                                     entrega=m.get("entrega", "entrega_1"),
-                                    guia=m.get("guia"),
+                                    guia=m.get("guia") or m.get("practica"),
+                                    practica=m.get("practica"),
                                     titulo=m.get("titulo", ""),
                                     descripcion=m.get("descripcion", ""),
                                     plantilla=m.get("plantilla"),

@@ -116,3 +116,22 @@ def test_moodle_ingestor_nested_zip_with_multi_wrapper_and_tar(tmp_path: Path):
     tar_files = extract_archive_payload(tar_bio.getvalue())
     assert len(tar_files) == 1
     assert tar_files[0][0] == "ejercicios/ej1/main.c"
+
+
+def test_moodle_ingestor_process_zip_force(tmp_path: Path):
+    zip_path = tmp_path / "Entrega #2-1228010.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr(
+            "Perez Juan_102_assignsubmission_file/main.c",
+            "int main(void) { return 0; }\n",
+        )
+
+    ingestor = MoodleIngestor(workspace_dir=tmp_path)
+    info, results = ingestor.process_zip(zip_path)
+    assert results[0].version_created == 1
+
+    # Re-ingestar con force=True
+    info2, results2 = ingestor.process_zip(zip_path, force=True)
+    assert results2[0].version_created == 1
+    assert (tmp_path / info2.activity_slug / "perez-juan_102" / "r1" / "main.c").exists()
+
