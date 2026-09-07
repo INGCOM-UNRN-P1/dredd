@@ -318,40 +318,53 @@ def test_write_individual_tool_reports_and_consolidation(tmp_path: Path):
 
 
 def test_delivery_mode_override_hierarchy_and_families(tmp_path: Path):
-    from dredd.core.config import DreddConfig, MappingRule
+    from dredd.core.config import (
+        DreddConfig,
+        MappingRule,
+        MODE_ARCHIVOS_INDIVIDUALES,
+        MODE_MAKEFILES_INDIVIDUALES,
+        MODE_PROYECTO,
+    )
     from dredd.core.guide_integration import ActivityGuide, GuideExercise
 
     cfg = DreddConfig(
         mapeos=[
-            MappingRule(zip_pattern="*tp1*.zip", entrega="tp01", mode="makefile"),
+            MappingRule(zip_pattern="*tp1*.zip", entrega="tp01", mode="makefiles_individuales"),
             MappingRule(zip_pattern="*tp2*.zip", entrega="tp02", mode="archivos_individuales"),
         ]
     )
 
     # 1. Caso CLI override manda sobre todo
-    mode_cli = cfg.get_delivery_mode(activity_slug="tp02", guide_mode="archivos_individuales", cli_override="makefile")
-    assert mode_cli == "makefile"
+    mode_cli = cfg.get_delivery_mode(activity_slug="tp02", guide_mode="archivos_individuales", cli_override="makefiles_individuales")
+    assert mode_cli == MODE_MAKEFILES_INDIVIDUALES
 
     # 2. Caso dredd.yaml manda sobre Deckard
     mode_yaml = cfg.get_delivery_mode(activity_slug="tp01", guide_mode="archivos_individuales")
-    assert mode_yaml == "makefile"
+    assert mode_yaml == MODE_MAKEFILES_INDIVIDUALES
 
     # 3. Caso Deckard especifica cuando no hay override
-    mode_guide = cfg.get_delivery_mode(activity_slug="tp03", guide_mode="makefile")
-    assert mode_guide == "makefile"
+    mode_guide = cfg.get_delivery_mode(activity_slug="tp03", guide_mode="proyecto")
+    assert mode_guide == MODE_PROYECTO
 
-    # 4. Caso auto-detección por Makefile
+    # 4. Caso auto-detección por Makefile en la raíz -> 'proyecto'
     sub_dir = tmp_path / "student_proj"
     sub_dir.mkdir()
     (sub_dir / "Makefile").write_text("all:\n\t@echo ok\n")
-    mode_auto = cfg.get_delivery_mode(activity_slug="tp04", target_path=sub_dir)
-    assert mode_auto == "makefile"
+    mode_auto_proj = cfg.get_delivery_mode(activity_slug="tp04", target_path=sub_dir)
+    assert mode_auto_proj == MODE_PROYECTO
 
-    # 5. Familia de ejercicios (librería, tests, uso)
+    # 5. Caso auto-detección por Makefiles en subcarpetas -> 'makefiles_individuales'
+    sub_dir_ind = tmp_path / "student_ind" / "ejercicio1"
+    sub_dir_ind.mkdir(parents=True)
+    (sub_dir_ind / "Makefile").write_text("all:\n\t@echo ok\n")
+    mode_auto_ind = cfg.get_delivery_mode(activity_slug="tp05", target_path=sub_dir_ind.parent)
+    assert mode_auto_ind == MODE_MAKEFILES_INDIVIDUALES
+
+    # 6. Familia de ejercicios (librería, tests, uso)
     guide = ActivityGuide(
         nombre="TDA Vector Dinámico",
         guide_dir=tmp_path,
-        tipo_entrega="makefile",
+        tipo_entrega="makefiles_individuales",
         familias=["tda_vector"],
         exercises=[
             GuideExercise(id="vector_lib", titulo="Lib", familia="tda_vector", rol_familia="libreria"),

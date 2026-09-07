@@ -241,6 +241,44 @@ class ToolChecksConfig:
         }
 
 
+MODE_ARCHIVOS_INDIVIDUALES = "archivos_individuales"
+MODE_MAKEFILES_INDIVIDUALES = "makefiles_individuales"
+MODE_PROYECTO = "proyecto"
+
+VALID_DELIVERY_MODES = {
+    MODE_ARCHIVOS_INDIVIDUALES,
+    MODE_MAKEFILES_INDIVIDUALES,
+    MODE_PROYECTO,
+}
+
+
+def normalize_delivery_mode(mode_val: Optional[str]) -> str:
+    """Normaliza identificadores de modo a 'archivos_individuales', 'makefiles_individuales' o 'proyecto'."""
+    if not mode_val:
+        return MODE_ARCHIVOS_INDIVIDUALES
+    m = str(mode_val).strip().lower().replace(" ", "_").replace("-", "_")
+    if m in (
+        "archivos_individuales",
+        "archivos",
+        "individual",
+        "archivo_individual",
+        "individuales",
+    ):
+        return MODE_ARCHIVOS_INDIVIDUALES
+    if m in (
+        "makefiles_individuales",
+        "makefile_individuales",
+        "makefile_individual",
+        "makefiles",
+        "makefile",
+        "make",
+    ):
+        return MODE_MAKEFILES_INDIVIDUALES
+    if m in ("proyecto", "project", "makefile_unico", "makefile_raiz", "libreria", "lib"):
+        return MODE_PROYECTO
+    return MODE_ARCHIVOS_INDIVIDUALES
+
+
 @dataclass
 class MappingRule:
     zip_pattern: str
@@ -250,7 +288,7 @@ class MappingRule:
     descripcion: str = ""
     plantilla: Optional[str] = None
     checks: Optional[Dict[str, Any]] = None
-    mode: Optional[str] = None  # "archivos_individuales", "makefile", "libreria", "proyecto", "auto"
+    mode: Optional[str] = None  # "archivos_individuales", "makefiles_individuales", "proyecto"
 
     def matches_zip(self, zip_filename: str) -> bool:
         """Verifica si el nombre de archivo ZIP coincide con el patrón configurado."""
@@ -297,12 +335,14 @@ class DreddConfig:
         target_path: Optional[Path] = None,
         cli_override: Optional[str] = None,
     ) -> str:
-        """Determina el modo de entrega efectivo ('archivos_individuales' o 'makefile')
+        """Determina el modo de entrega efectivo ('archivos_individuales', 'makefiles_individuales' o 'proyecto')
         aplicando la jerarquía de prioridad:
         1. CLI override explícito (si se proporcionó)
-        2. dredd.yaml (regla de entrega puntual o global)
+        2. dredd.yaml (regla de entrega puntual)
         3. Deckard guía (guia.tipo_entrega)
-        4. Detección automática por presencia de Makefile
+        4. Detección automática por estructura de archivos en target_path:
+           - Makefiles en subcarpetas de ejercicios -> 'makefiles_individuales'
+           - Makefile único en la raíz -> 'proyecto'
         5. Fallback por defecto ('archivos_individuales')
         """
         if hasattr(cli_override, "default"):
@@ -316,23 +356,32 @@ class DreddConfig:
             guide_mode = None
 
         if cli_override and cli_override.lower() not in ("auto", "none", ""):
-            return "makefile" if cli_override.lower() in ("make", "makefile", "proyecto", "libreria") else "archivos_individuales"
+            return normalize_delivery_mode(cli_override)
 
         if activity_slug:
             rule = self.find_mapping_for_activity(activity_slug)
             if rule and rule.mode and rule.mode.lower() not in ("auto", "none", ""):
-                return "makefile" if rule.mode.lower() in ("make", "makefile", "proyecto", "libreria") else "archivos_individuales"
+                return normalize_delivery_mode(rule.mode)
 
         if guide_mode and guide_mode.lower() not in ("auto", "none", ""):
-            return "makefile" if guide_mode.lower() in ("make", "makefile", "proyecto", "libreria") else "archivos_individuales"
+            return normalize_delivery_mode(guide_mode)
 
         if target_path and target_path.is_dir():
-            if (target_path / "Makefile").is_file() or (target_path / "makefile").is_file():
-                return "makefile"
-            if list(target_path.glob("**/Makefile")) or list(target_path.glob("**/makefile")):
-                return "makefile"
+            has_sub_makefiles = bool(
+                list(target_path.glob("ejercicio*/Makefile"))
+                + list(target_path.glob("ejercicio*/makefile"))
+                + list(target_path.glob("ejercicios/ejercicio*/Makefile"))
+                + list(target_path.glob("ejercicios/ejercicio*/makefile"))
+                + list(target_path.glob("**/ejercicios/ejercicio*/Makefile"))
+                + list(target_path.glob("**/ejercicios/ejercicio*/makefile"))
+            )
+            if has_sub_makefiles:
+                return MODE_MAKEFILES_INDIVIDUALES
 
-        return "archivos_individuales"
+            if (target_path / "Makefile").is_file() or (target_path / "makefile").is_file():
+                return MODE_PROYECTO
+
+        return MODE_ARCHIVOS_INDIVIDUALES
 
     def find_mapping_for_zip(self, zip_filename: str) -> Optional[MappingRule]:
         """Encuentra la primera regla de mapeo que coincida con el archivo ZIP."""

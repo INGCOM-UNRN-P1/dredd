@@ -100,14 +100,18 @@ def ejecutar_evaluacion(
     exercise_slug, submissions_dir = resolve_submissions_dir(ws_dir, exercise)
     guide = load_activity_guide(submissions_dir, exercise_slug, ws_dir)
 
-    # Determinar modo de construcción efectivo con precedencia: CLI override > Guía Deckard > Default
-    effective_tipo = tipo_entrega or getattr(guide, "tipo_entrega", None) or "archivos_individuales"
-    if effective_tipo in ("individual", "archivos", "archivos_individuales"):
-        effective_tipo = "archivos_individuales"
-    elif effective_tipo in ("make", "makefile"):
-        effective_tipo = "makefile"
-    elif effective_tipo in ("proyecto", "project", "libreria", "lib"):
-        effective_tipo = "proyecto"
+    # Determinar modo de construcción efectivo con precedencia: CLI override > dredd.yaml > Guía Deckard > Auto > Default
+    from dredd.core.config import load_dredd_config, normalize_delivery_mode
+    cfg = load_dredd_config(ws_dir)
+    effective_tipo = (
+        cfg.get_delivery_mode(
+            activity_slug=exercise_slug,
+            guide_mode=getattr(guide, "tipo_entrega", None),
+            cli_override=tipo_entrega,
+        )
+        if cfg
+        else normalize_delivery_mode(tipo_entrega or getattr(guide, "tipo_entrega", None))
+    )
 
     target_students = []
     if student:
@@ -229,7 +233,7 @@ def cmd_eval(
         "--tipo-entrega",
         "--build-mode",
         "-m",
-        help="Tipo de entrega / modo de construcción ('archivos_individuales' vs 'makefile' vs 'proyecto' / 'libreria'). Hace override a lo indicado por Deckard.",
+        help="Tipo de entrega / modo de construcción ('archivos_individuales', 'makefiles_individuales' o 'proyecto'). Hace override a dredd.yaml y Deckard.",
     ),
     dry_run: bool = typer.Option(
         False,
@@ -393,7 +397,7 @@ def cmd_evaluate_run(
         "--tipo-entrega",
         "--build-mode",
         "-m",
-        help="Tipo de entrega / modo de construcción ('archivos_individuales' vs 'makefile' vs 'proyecto' / 'libreria').",
+        help="Tipo de entrega / modo de construcción ('archivos_individuales', 'makefiles_individuales' o 'proyecto').",
     ),
     dry_run: bool = typer.Option(
         False,
@@ -841,7 +845,12 @@ def cmd_config_add_entrega(
     ripley_strict: Optional[bool] = typer.Option(None, "--ripley-strict/--no-ripley-strict", help="Modo estricto de Ripley para esta entrega."),
     disabled_rules: Optional[str] = typer.Option(None, "--disabled-rules", help="Códigos de reglas Ripley a omitir separados por coma (ej. '0x0009h,0x0004h')."),
     memory_mb: Optional[int] = typer.Option(None, "--memory-mb", help="Límite estricto de RAM en MB para el sandbox."),
-    mode: Optional[str] = typer.Option(None, "--mode", "-m", help="Modo de construcción para esta entrega ('archivos_individuales' o 'makefile')."),
+    mode: Optional[str] = typer.Option(
+        None,
+        "--mode",
+        "-m",
+        help="Modo de construcción para esta entrega ('archivos_individuales', 'makefiles_individuales' o 'proyecto').",
+    ),
     workspace: Path = typer.Option(Path("."), "--workspace", "-w", help="Directorio raíz del workspace."),
 ) -> None:
     """Agrega o actualiza una entrega en dredd.yaml con su patrón ZIP, guía Deckard, modo y chequeos específicos."""
@@ -1037,7 +1046,7 @@ def cmd_rerun(
         "--tipo-entrega",
         "--build-mode",
         "-m",
-        help="Tipo de entrega / modo de construcción ('archivos_individuales' vs 'makefile' vs 'proyecto' / 'libreria').",
+        help="Tipo de entrega / modo de construcción ('archivos_individuales', 'makefiles_individuales' o 'proyecto').",
     ),
     dry_run: bool = typer.Option(
         False,
