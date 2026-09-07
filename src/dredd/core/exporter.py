@@ -37,7 +37,7 @@ class MoodleExporter:
         students_data: List[Dict[str, Any]] = []
 
         for s_dir in sorted(activity_dir.iterdir()):
-            if not s_dir.is_dir() or s_dir.name.startswith(".") or s_dir.name in ("guia", "guide", "templates", "informe"):
+            if not s_dir.is_dir() or s_dir.name.startswith((".", "_")) or s_dir.name in ("guia", "guide", "templates", "informe", "baseline", "_baseline"):
                 continue
 
             db_path = s_dir / ".metadata.db"

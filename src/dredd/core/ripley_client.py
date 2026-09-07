@@ -19,6 +19,7 @@ from dredd.core.valgrind import run_valgrind_check, ValgrindReport
 def audit_style_with_gaff(
     target_path: Path,
     checks: Optional[ToolChecksConfig] = None,
+    uncompleted_exercises: Optional[Set[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Ejecuta el linter de estilo Gaff sobre los archivos C y H del estudiante."""
     findings = []
@@ -27,7 +28,10 @@ def audit_style_with_gaff(
     else:
         c_and_h_files = sorted([
             f for f in target_path.glob("**/*")
-            if f.is_file() and f.suffix.lower() in (".c", ".h", ".hpp") and not any(p.startswith(".") for p in f.parts)
+            if f.is_file()
+            and f.suffix.lower() in (".c", ".h", ".hpp")
+            and not any(p.startswith(".") for p in f.parts)
+            and not (uncompleted_exercises and (any(part in uncompleted_exercises for part in f.parts) or f.stem in uncompleted_exercises))
         ])
 
     enforce_var_len = checks.enforce_variable_length if checks else True
@@ -367,6 +371,7 @@ def run_ripley_analysis(
     workspace_dir: Optional[Path] = None,
     checks_override: Optional[Any] = None,
     tipo_entrega: Optional[str] = None,
+    baseline_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
     if guide is None:
         from dredd.core.guide_integration import (
@@ -382,13 +387,13 @@ def run_ripley_analysis(
             slug = activity_slug or target_path.name
             guide = load_activity_guide(target_path, slug, workspace_dir)
 
-    from dredd.core.config import load_dredd_config, ToolChecksConfig
+    from dredd.core.config import DreddConfig, load_dredd_config, ToolChecksConfig
 
-    cfg = load_dredd_config(workspace_dir or target_path)
+    cfg = load_dredd_config(workspace_dir or target_path) or load_dredd_config(target_path) or DreddConfig()
     if checks_override:
         checks = checks_override
     else:
-        checks = cfg.get_effective_checks(activity_slug) if cfg else ToolChecksConfig()
+        checks = cfg.get_effective_checks(activity_slug)
 
     from dredd.core.config import (
         MODE_ARCHIVOS_INDIVIDUALES,
@@ -397,19 +402,11 @@ def run_ripley_analysis(
         normalize_delivery_mode,
     )
 
-    raw_mode = (
-        cfg.get_delivery_mode(
-            activity_slug=activity_slug,
-            guide_mode=getattr(guide, "tipo_entrega", None),
-            target_path=target_path,
-            cli_override=tipo_entrega,
-        )
-        if cfg
-        else (
-            tipo_entrega
-            or getattr(guide, "tipo_entrega", None)
-            or "archivos_individuales"
-        )
+    raw_mode = cfg.get_delivery_mode(
+        activity_slug=activity_slug,
+        guide_mode=getattr(guide, "tipo_entrega", None),
+        target_path=target_path,
+        cli_override=tipo_entrega,
     )
     effective_mode = normalize_delivery_mode(raw_mode)
 
@@ -452,6 +449,12 @@ def run_ripley_analysis(
             except Exception:
                 pass
 
+    # Detección de plantilla _baseline para identificar ejercicios completados vs sin modificar
+    from dredd.core.baseline import classify_submission_exercises, find_baseline_dir
+    b_dir = baseline_dir or find_baseline_dir(target_path, workspace_dir=workspace_dir)
+    baseline_info = classify_submission_exercises(target_path, baseline_dir=b_dir)
+    uncompleted_set = set(baseline_info.get("uncompleted", []))
+
     def _collect_ast_findings() -> List[Dict[str, Any]]:
         findings = []
         if checks.ripley_enabled:
@@ -459,13 +462,21 @@ def run_ripley_analysis(
                 from ripley.core.engine import analyze_target
 
                 res = analyze_target(target_path)
-                findings.extend(res.to_dict().get("ast_findings", []))
+                raw_findings = res.to_dict().get("ast_findings", [])
+                if uncompleted_set:
+                    raw_findings = [
+                        rf for rf in raw_findings
+                        if not any(u in (rf.get("file") or "") for u in uncompleted_set)
+                    ]
+                findings.extend(raw_findings)
             except Exception:
                 pass
         if not findings:
             from dredd.core.ast_checker import audit_c_file
             for cf in sorted(target_path.glob("**/*.c")):
                 if not any(part.startswith(".") for part in cf.parts):
+                    if uncompleted_set and (any(part in uncompleted_set for part in cf.parts) or cf.stem in uncompleted_set):
+                        continue
                     findings.extend(audit_c_file(cf))
         return findings
 
@@ -474,13 +485,18 @@ def run_ripley_analysis(
         f
         for f in target_path.glob("**/*.c")
         if not any(part.startswith(".") for part in f.parts)
+        and not (uncompleted_set and (any(part in uncompleted_set for part in f.parts) or f.stem in uncompleted_set))
     ])
 
     if effective_mode == MODE_MAKEFILES_INDIVIDUALES:
         from dredd.core.compiler import compile_with_make
         from dredd.core.makefile_eval import evaluate_makefile_exercises
 
-        makefile_results = evaluate_makefile_exercises(target_path)
+        makefile_results = evaluate_makefile_exercises(
+            target_path,
+            baseline_dir=b_dir,
+            uncompleted_exercises=uncompleted_set,
+        )
         ast_findings = _collect_ast_findings()
 
         if makefile_results:
@@ -826,7 +842,11 @@ def run_ripley_analysis(
 
     # 8. Auditoría de estilo y convenciones arquitectónicas (Gaff)
     if checks.gaff_enabled:
-        style_findings, style_metrics = audit_style_with_gaff(target_path, checks=checks)
+        style_findings, style_metrics = audit_style_with_gaff(
+            target_path,
+            checks=checks,
+            uncompleted_exercises=uncompleted_set,
+        )
         res_dict["style_findings"] = style_findings
         res_dict["style_metrics"] = style_metrics
 
@@ -834,6 +854,9 @@ def run_ripley_analysis(
     res_dict["binary_findings"] = binary_findings
     if binary_findings:
         res_dict["ast_findings"] = binary_findings + res_dict.get("ast_findings", [])
+
+    # 10. Información de línea base y ejercicios completados vs omitidos
+    res_dict["baseline_info"] = baseline_info
 
     return res_dict
 

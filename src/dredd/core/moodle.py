@@ -61,7 +61,7 @@ def export_grades_csv(
         writer.writerow(["Estudiante", "Actividad", "Calificacion", "Estado"])
 
         for student_dir in sorted(submissions_dir.iterdir()):
-            if not student_dir.is_dir() or student_dir.name.startswith("."):
+            if not student_dir.is_dir() or student_dir.name.startswith((".", "_")) or student_dir.name in ("guia", "guide", "templates", "informe", "baseline", "_baseline"):
                 continue
             student = student_dir.name
             grade = grades_map.get(student, 0.0)

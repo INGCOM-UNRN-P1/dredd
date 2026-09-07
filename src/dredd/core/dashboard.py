@@ -164,7 +164,7 @@ def recolectar_datos_dashboard(
     estudiantes: List[Dict[str, Any]] = []
     if entregas_dir and entregas_dir.is_dir():
         for sub in sorted(entregas_dir.iterdir()):
-            if not sub.is_dir() or sub.name.startswith("."):
+            if not sub.is_dir() or sub.name.startswith((".", "_")) or sub.name in ("guia", "guide", "templates", "informe", "baseline", "_baseline"):
                 continue
 
             nombre_alumno = sub.name.replace("_", " ").title()

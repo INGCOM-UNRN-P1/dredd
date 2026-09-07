@@ -148,6 +148,14 @@ class PlagiarismDetector:
 
     def analyze_submissions(self, submissions_dir: Path, threshold: Optional[float] = None,
                             plantilla: Optional[Path] = None) -> List[SimilarityMatch]:
+        if plantilla is None:
+            try:
+                from dredd.core.baseline import find_baseline_dir
+                b_dir = find_baseline_dir(submissions_dir)
+                if b_dir:
+                    plantilla = b_dir
+            except Exception:
+                pass
         if plantilla is not None and self._stripper is None:
             self.__init__(k=self.k, w=self.w, threshold=self.threshold, plantilla=plantilla)
         thresh = threshold if threshold is not None else self.threshold
@@ -156,7 +164,9 @@ class PlagiarismDetector:
 
         student_dirs = [
             d for d in sorted(submissions_dir.iterdir())
-            if d.is_dir() and not d.name.startswith(".") and d.name not in ("guia", "guide", "templates", "informe")
+            if d.is_dir()
+            and not d.name.startswith((".", "_"))
+            and d.name not in ("guia", "guide", "templates", "informe", "baseline", "_baseline")
         ]
         student_fps: Dict[str, Set[int]] = {}
 

@@ -225,6 +225,14 @@ def write_individual_tool_reports(
         all_c_files.add("entrega_general")
 
     res_lines = ["## Resumen de Evaluación por Archivo\n"]
+    b_info = analysis.get("baseline_info", {})
+    if b_info.get("has_baseline") and b_info.get("uncompleted"):
+        uncompleted = b_info.get("uncompleted", [])
+        completed = b_info.get("completed", [])
+        res_lines.append(
+            f"> ℹ️ **Filtro de plantilla (`_baseline`):** Se evaluaron **{len(completed)}** ejercicio(s) completado(s): {', '.join(f'`{e}`' for e in completed)}. "
+            f"Se ignoraron **{len(uncompleted)}** ejercicio(s) sin modificar (idénticos a la plantilla original): {', '.join(f'`{e}`' for e in uncompleted)}.\n"
+        )
     res_lines.append("| Archivo | Estado Compilación | Evaluación de Estilo | Valgrind (Fugas) | Observaciones Cátedra |")
     res_lines.append("| :--- | :---: | :---: | :---: | :--- |")
     if binary_findings:
@@ -522,6 +530,7 @@ def generate_consolidated_report_from_rni(
     output_file: Path,
     revision: Optional[str] = None,
     guide: Optional[Any] = None,
+    analysis: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Consolida todos los informes Markdown generados por herramientas dentro de rNi en un único informe."""
     lines = []
@@ -548,6 +557,12 @@ def generate_consolidated_report_from_rni(
             lines.append(f"**Origen de consigna:** `{guide.enunciado_source}`")
         ejs_str = ", ".join(f"`{e.display_name}`" for e in guide.exercises)
         lines.append(f"**Ejercicios requeridos:** {ejs_str}")
+        b_info = (analysis or {}).get("baseline_info", {})
+        if b_info.get("has_baseline") and b_info.get("uncompleted"):
+            uncompleted = b_info.get("uncompleted", [])
+            completed = b_info.get("completed", [])
+            lines.append(f"**Ejercicios completados:** {', '.join(f'`{e}`' for e in completed)}")
+            lines.append(f"**Ejercicios sin modificar (_baseline):** {', '.join(f'`{e}`' for e in uncompleted)} *(ignorados)*")
 
     if metadata.files_list:
         lines.append("\n### Archivos contenidos")
@@ -812,6 +827,7 @@ def generate_student_report(
         output_file=output_file,
         revision=rev_str,
         guide=guide,
+        analysis=analysis,
     )
 
 

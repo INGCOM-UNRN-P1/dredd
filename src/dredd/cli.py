@@ -81,6 +81,7 @@ def ejecutar_evaluacion(
     dry_run: bool = False,
     failed_only: bool = False,
     workspace_dir: Optional[Path] = None,
+    baseline: Optional[Path] = None,
 ) -> None:
     """Ejecuta el ciclo de evaluación sobre una o varias entregas de estudiantes."""
     from dredd.core.reporter import is_submission_failed
@@ -95,22 +96,22 @@ def ejecutar_evaluacion(
     tipo_entrega = _unwrap_cli_value(tipo_entrega, None)
     dry_run = bool(_unwrap_cli_value(dry_run, False))
     failed_only = bool(_unwrap_cli_value(failed_only, False))
+    baseline = _unwrap_cli_value(baseline, None)
+    if baseline is not None and not isinstance(baseline, Path):
+        baseline = Path(baseline)
     ws_dir = (workspace_dir or Path.cwd()).resolve()
 
     exercise_slug, submissions_dir = resolve_submissions_dir(ws_dir, exercise)
     guide = load_activity_guide(submissions_dir, exercise_slug, ws_dir)
 
     # Determinar modo de construcción efectivo con precedencia: CLI override > dredd.yaml > Guía Deckard > Auto > Default
-    from dredd.core.config import load_dredd_config, normalize_delivery_mode
-    cfg = load_dredd_config(ws_dir)
-    effective_tipo = (
-        cfg.get_delivery_mode(
-            activity_slug=exercise_slug,
-            guide_mode=getattr(guide, "tipo_entrega", None),
-            cli_override=tipo_entrega,
-        )
-        if cfg
-        else normalize_delivery_mode(tipo_entrega or getattr(guide, "tipo_entrega", None))
+    from dredd.core.config import DreddConfig, load_dredd_config, normalize_delivery_mode
+    cfg = load_dredd_config(submissions_dir) or load_dredd_config(ws_dir) or DreddConfig()
+    effective_tipo = cfg.get_delivery_mode(
+        activity_slug=exercise_slug,
+        guide_mode=getattr(guide, "tipo_entrega", None),
+        target_path=submissions_dir,
+        cli_override=tipo_entrega,
     )
 
     target_students = []
@@ -122,7 +123,9 @@ def ejecutar_evaluacion(
             raise typer.Exit(code=1)
         all_candidates = [
             d.name for d in sorted(submissions_dir.iterdir())
-            if d.is_dir() and not d.name.startswith(".") and d.name not in ("guia", "guide", "templates", "informe")
+            if d.is_dir()
+            and not d.name.startswith((".", "_"))
+            and d.name not in ("guia", "guide", "templates", "informe", "baseline", "_baseline")
         ]
         if failed_only:
             target_students = [
@@ -184,6 +187,7 @@ def ejecutar_evaluacion(
                 activity_slug=exercise_slug,
                 workspace_dir=ws_dir,
                 tipo_entrega=effective_tipo,
+                baseline_dir=baseline,
             )
 
             report_file = repo_path / f"{s_name}_{rev_str}.md"
@@ -240,6 +244,12 @@ def cmd_eval(
         "--dry-run",
         help="Modo Dry Run: evalúa únicamente una muestra de hasta 3 estudiantes representativos antes del lote completo.",
     ),
+    baseline: Optional[Path] = typer.Option(
+        None,
+        "--baseline",
+        "-b",
+        help="Directorio de línea base (_baseline) con las plantillas originales para omitir ejercicios sin completar.",
+    ),
 ) -> None:
     """Clona/actualiza el repositorio o evalúa entregas locales, ejecuta el análisis con Ripley y genera el informe Markdown."""
     if exercise == "clean":
@@ -259,6 +269,7 @@ def cmd_eval(
         template_dir=template_dir,
         tipo_entrega=tipo_entrega,
         dry_run=dry_run,
+        baseline=baseline,
     )
 
 
@@ -1091,8 +1102,8 @@ def cmd_export_guarani(
 
     estudiantes = []
     if entregas.is_dir():
-        for sub_dir in entregas.iterdir():
-            if sub_dir.is_dir():
+        for sub_dir in sorted(entregas.iterdir()):
+            if sub_dir.is_dir() and not sub_dir.name.startswith((".", "_")) and sub_dir.name not in ("guia", "guide", "templates", "informe", "baseline", "_baseline"):
                 rep = find_student_report(sub_dir)
                 nota = 0.0
                 if rep and rep.is_file():

@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 import subprocess
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Set
 
 
 @dataclass
@@ -15,16 +15,34 @@ class ExerciseEvalResult:
     output_log: str = ""
 
 
-def evaluate_makefile_exercises(repo_path: Path, timeout_sec: int = 60) -> List[ExerciseEvalResult]:
-    """Busca subdirectorios 'ejercicio*' con Makefile y ejecuta make clean, test y check."""
+def evaluate_makefile_exercises(
+    repo_path: Path,
+    timeout_sec: int = 60,
+    baseline_dir: Optional[Path] = None,
+    uncompleted_exercises: Optional[Set[str]] = None,
+) -> List[ExerciseEvalResult]:
+    """Busca subdirectorios 'ejercicio*' con Makefile y ejecuta make clean, test y check, ignorando ejercicios sin completar."""
     results = []
+    if uncompleted_exercises is None:
+        try:
+            from dredd.core.baseline import classify_submission_exercises
+            b_info = classify_submission_exercises(repo_path, baseline_dir=baseline_dir)
+            uncompleted_exercises = set(b_info.get("uncompleted", []))
+        except Exception:
+            uncompleted_exercises = set()
+
     candidates = (
         list(repo_path.glob("ejercicio*"))
         + list(repo_path.glob("ejercicios/ejercicio*"))
         + list(repo_path.glob("**/ejercicios/ejercicio*"))
     )
     exercise_dirs = sorted(
-        {d for d in candidates if d.is_dir() and (d / "Makefile").is_file()},
+        {
+            d for d in candidates
+            if d.is_dir()
+            and (d / "Makefile").is_file()
+            and (not uncompleted_exercises or d.name not in uncompleted_exercises)
+        },
         key=lambda p: p.name,
     )
 

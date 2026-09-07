@@ -54,7 +54,7 @@ def reformat_submission_to_rn(
     # 1. Recolectar archivos sueltos fuera de cualquier carpeta r* o .git / .md / .db
     loose_items: List[Path] = []
     for item in student_dir.iterdir():
-        if item.name.startswith(".") or item.name.endswith(".md") or item.name == ".metadata.db":
+        if item.name.startswith(".") or item.name.endswith((".md", ".log")) or item.name == ".metadata.db":
             continue
         # Omitir carpetas de revisión rN, rNi o rN_i
         if item.is_dir() and re.match(r"^r\d+(?:_i|i)?$", item.name, re.IGNORECASE):
