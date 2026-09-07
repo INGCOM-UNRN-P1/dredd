@@ -2,8 +2,10 @@
 
 from dataclasses import dataclass, field
 import hashlib
+import io
 from pathlib import Path
 import re
+import tarfile
 from typing import Dict, List, Optional, Tuple
 import zipfile
 
@@ -11,7 +13,99 @@ from slugify import slugify
 
 from dredd.core.db import DatabaseManager, StudentRecord
 
-ALLOWED_EXTENSIONS = {".c", ".h"}
+ALLOWED_EXTENSIONS = {".c", ".h", ".mk", ".md", ".txt"}
+ALLOWED_FILENAMES = {"makefile", "cmakelists.txt"}
+IGNORED_PARTS = {"__macosx", ".ds_store", ".git", ".vscode", ".idea"}
+
+
+def is_ignored(path_str: str) -> bool:
+    """Verifica si una ruta contiene componentes que deban descartarse."""
+    p = Path(path_str)
+    if any(part.lower() in IGNORED_PARTS for part in p.parts) or p.name.startswith("."):
+        return True
+    return False
+
+
+def is_allowed_file(rel_path_str: str) -> bool:
+    """Valida si un archivo es admisible como código o configuración del proyecto."""
+    if is_ignored(rel_path_str):
+        return False
+    p = Path(rel_path_str)
+    if p.name.lower() in ALLOWED_FILENAMES:
+        return True
+    return p.suffix.lower() in ALLOWED_EXTENSIONS
+
+
+PROTECTED_ROOT_DIRS = {"ejercicios", "src", "lib", "test", "tests"}
+
+
+def is_protected_dir(name: str) -> bool:
+    """Evita descartar directorios semánticos de código o de ejercicios."""
+    nl = name.lower()
+    if nl in PROTECTED_ROOT_DIRS:
+        return True
+    if re.match(r"^ej(?:ercicio)?_?\d+", nl):
+        return True
+    return False
+
+
+def _get_common_root_prefix(names: List[str]) -> str:
+    """Calcula de forma iterativa el prefijo común de carpetas envolventes."""
+    valid_names = [n for n in names if not is_ignored(n)]
+    if not valid_names:
+        return ""
+
+    prefix = ""
+    while True:
+        current_names = [n[len(prefix):] for n in valid_names]
+        parts_list = [n.split("/") for n in current_names]
+        if all(len(p) > 1 for p in parts_list):
+            roots = {p[0] for p in parts_list}
+            if len(roots) == 1:
+                root = list(roots)[0]
+                if is_protected_dir(root):
+                    break
+                prefix += root + "/"
+                continue
+        break
+    return prefix
+
+
+def extract_archive_payload(raw_bytes: bytes) -> List[Tuple[str, bytes]]:
+    """Extrae archivos permitidos de un ZIP o TAR en memoria normalizando barras y jerarquías."""
+    extracted: List[Tuple[str, bytes]] = []
+
+    # 1. Probar como ZIP
+    if zipfile.is_zipfile(io.BytesIO(raw_bytes)):
+        with zipfile.ZipFile(io.BytesIO(raw_bytes)) as z:
+            names = [n.replace("\\", "/") for n in z.namelist() if not n.replace("\\", "/").endswith("/")]
+            strip_prefix = _get_common_root_prefix(names)
+            for orig_name, n in zip(z.namelist(), names):
+                if n.endswith("/"):
+                    continue
+                rel = n[len(strip_prefix):] if strip_prefix and n.startswith(strip_prefix) else n
+                if is_allowed_file(rel):
+                    extracted.append((rel, z.read(orig_name)))
+        return extracted
+
+    # 2. Fallback: Probar como TAR (caso Iriarte)
+    try:
+        if tarfile.is_tarfile(io.BytesIO(raw_bytes)):
+            with tarfile.open(fileobj=io.BytesIO(raw_bytes)) as tf:
+                members = [m for m in tf.getmembers() if m.isfile()]
+                names = [m.name.replace("\\", "/") for m in members]
+                strip_prefix = _get_common_root_prefix(names)
+                for m, n in zip(members, names):
+                    rel = n[len(strip_prefix):] if strip_prefix and n.startswith(strip_prefix) else n
+                    if is_allowed_file(rel):
+                        f = tf.extractfile(m)
+                        if f:
+                            extracted.append((rel, f.read()))
+            return extracted
+    except Exception:
+        pass
+
+    return extracted
 
 
 @dataclass
@@ -204,7 +298,30 @@ class MoodleIngestor:
                     ext = Path(filename).suffix.lower()
                     raw_content = zf.read(fpath)
 
-                    if ext in ALLOWED_EXTENSIONS:
+                    # Si es archivo comprimido (zip, tar, o bytes de zip/tar), extraer su contenido respetando jerarquías
+                    if ext in (".zip", ".tar", ".gz", ".tgz") or zipfile.is_zipfile(io.BytesIO(raw_content)) or tarfile.is_tarfile(io.BytesIO(raw_content)):
+                        archived_files = extract_archive_payload(raw_content)
+                        if archived_files:
+                            for rel_path, file_bytes in archived_files:
+                                text, _ = normalize_encoding(file_bytes)
+                                utf8_bytes = text.encode("utf-8")
+                                sha256 = hashlib.sha256(utf8_bytes).hexdigest()
+                                sources.append(
+                                    ProcessedSourceFile(
+                                        filename=rel_path,
+                                        content=utf8_bytes,
+                                        sha256=sha256,
+                                        size_bytes=len(utf8_bytes),
+                                    )
+                                )
+                        else:
+                            ignored.append(
+                                IgnoredFileInfo(
+                                    filename=filename,
+                                    reason="Archivo comprimido sin fuentes válidos o formato no soportado",
+                                )
+                            )
+                    elif is_allowed_file(fpath):
                         text, _ = normalize_encoding(raw_content)
                         utf8_bytes = text.encode("utf-8")
                         sha256 = hashlib.sha256(utf8_bytes).hexdigest()
@@ -220,7 +337,7 @@ class MoodleIngestor:
                         ignored.append(
                             IgnoredFileInfo(
                                 filename=filename,
-                                reason=f"Extensión no permitida '{ext}'",
+                                reason=f"Extensión o archivo no permitido '{ext}'",
                             )
                         )
 
@@ -257,7 +374,9 @@ class MoodleIngestor:
                         rev_dir.mkdir(parents=True, exist_ok=True)
 
                         for src in sources:
-                            (rev_dir / src.filename).write_bytes(src.content)
+                            dest = rev_dir / src.filename
+                            dest.parent.mkdir(parents=True, exist_ok=True)
+                            dest.write_bytes(src.content)
 
                         db.add_revision(
                             student_slug=parsed_student.student_slug,

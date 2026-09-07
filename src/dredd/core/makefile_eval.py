@@ -18,10 +18,15 @@ class ExerciseEvalResult:
 def evaluate_makefile_exercises(repo_path: Path, timeout_sec: int = 60) -> List[ExerciseEvalResult]:
     """Busca subdirectorios 'ejercicio*' con Makefile y ejecuta make clean, test y check."""
     results = []
-    exercise_dirs = sorted([
-        d for d in repo_path.glob("ejercicio*")
-        if d.is_dir() and (d / "Makefile").is_file()
-    ])
+    candidates = (
+        list(repo_path.glob("ejercicio*"))
+        + list(repo_path.glob("ejercicios/ejercicio*"))
+        + list(repo_path.glob("**/ejercicios/ejercicio*"))
+    )
+    exercise_dirs = sorted(
+        {d for d in candidates if d.is_dir() and (d / "Makefile").is_file()},
+        key=lambda p: p.name,
+    )
 
     for ex_dir in exercise_dirs:
         logs = []

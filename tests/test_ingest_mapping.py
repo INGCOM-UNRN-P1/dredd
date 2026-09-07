@@ -75,3 +75,44 @@ def test_moodle_ingestor_process_zip(tmp_path: Path):
     assert len(results) == 1
     assert (tmp_path / info.activity_slug / "alvarez-juan_101" / "r1" / "main.c").exists()
     assert not (tmp_path / info.activity_slug / "alvarez-juan_101" / "r1f").exists()
+
+
+def test_moodle_ingestor_nested_zip_with_multi_wrapper_and_tar(tmp_path: Path):
+    import tarfile
+    from dredd.core.ingest import extract_archive_payload, is_allowed_file, _get_common_root_prefix
+
+    assert is_allowed_file("Makefile")
+    assert is_allowed_file("CMakeLists.txt")
+    assert is_allowed_file("rules.mk")
+    assert not is_allowed_file("__MACOSX/foo/Makefile")
+    assert not is_allowed_file(".DS_Store")
+    assert not is_allowed_file(".vscode/settings.json")
+
+    # Multi-level wrapper test
+    names = [
+        "wrap1/wrap2/Makefile",
+        "wrap1/wrap2/ejercicios/ej1/main.c",
+        "wrap1/wrap2/.DS_Store",
+    ]
+    assert _get_common_root_prefix(names) == "wrap1/wrap2/"
+
+    # Nested zip with backslashes
+    bio = io.BytesIO()
+    with zipfile.ZipFile(bio, "w") as z:
+        z.writestr("subfolder\\ejercicios\\ej1\\main.c", "int main() { return 0; }")
+        z.writestr("subfolder\\Makefile", "all:\n\tgcc main.c")
+    files = extract_archive_payload(bio.getvalue())
+    extracted_names = {f[0] for f in files}
+    assert "ejercicios/ej1/main.c" in extracted_names
+    assert "Makefile" in extracted_names
+
+    # TAR payload (fallback Thiago Iriarte case)
+    tar_bio = io.BytesIO()
+    with tarfile.open(fileobj=tar_bio, mode="w") as tf:
+        ti = tarfile.TarInfo(name="wrap/ejercicios/ej1/main.c")
+        c_bytes = b"int main() { return 1; }"
+        ti.size = len(c_bytes)
+        tf.addfile(ti, io.BytesIO(c_bytes))
+    tar_files = extract_archive_payload(tar_bio.getvalue())
+    assert len(tar_files) == 1
+    assert tar_files[0][0] == "ejercicios/ej1/main.c"
