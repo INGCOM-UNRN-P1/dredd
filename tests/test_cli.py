@@ -11,7 +11,7 @@ def test_cli_help():
     res = runner.invoke(app, ["--help"])
     assert res.exit_code == 0
     assert "eval" in res.output
-    assert "comment" in res.output
+    assert "github" in res.output
     assert "plagiarism" in res.output
     assert "moodle" in res.output
 

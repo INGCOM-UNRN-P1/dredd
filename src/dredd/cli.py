@@ -22,6 +22,9 @@ app = typer.Typer(
 moodle_app = typer.Typer(name="moodle", help="Gestión de canales Moodle (ingesta ZIP y planillas).", no_args_is_help=True)
 app.add_typer(moodle_app, name="moodle")
 
+github_app = typer.Typer(name="github", help="Comandos de integración con GitHub (clone, comment, pr-fix).", no_args_is_help=True)
+app.add_typer(github_app, name="github")
+
 config_app = typer.Typer(name="config", help="Gestión de configuración, entregas, guías y políticas de chequeo.", no_args_is_help=True)
 app.add_typer(config_app, name="config")
 
@@ -222,7 +225,7 @@ def ejecutar_evaluacion(
 
     console.print("\n")
     console.print(table)
-    console.print("\n[dim]Para enviar los comentarios a los PRs correspondientes, ejecute: dredd comment <ejercicio> <estudiante>[/dim]\n")
+    console.print("\n[dim]Para enviar los comentarios a los PRs correspondientes, ejecute: dredd github comment <ejercicio> <estudiante>[/dim]\n")
 
 
 @app.command("eval")
@@ -428,7 +431,39 @@ def cmd_evaluate_run(
     )
 
 
-@app.command("comment")
+@github_app.command("clone")
+def cmd_github_clone(
+    practica: str = typer.Argument(..., help="Nombre de la actividad / práctica (ej. TP0, tp01, etc.)."),
+    directorio_destino: str = typer.Argument(..., help="Nombre del directorio destino para el estudiante (ej. TP0-Enehuen)."),
+    repo_url: str = typer.Argument(..., help="URL del repositorio de GitHub a clonar (HTTPS o SSH)."),
+) -> None:
+    """Clona o actualiza el repositorio de una entrega de GitHub en <practica>/<directorio_destino>/repo."""
+    from dredd.core.git_ops import clone_submission_repo, get_repo_metadata
+
+    ws_dir = Path.cwd().resolve()
+    exercise_slug, submissions_dir = resolve_submissions_dir(ws_dir, practica)
+
+    console.print(f"Descargando entrega para [cyan]{directorio_destino}[/cyan] ({practica})...")
+    try:
+        repo_path, is_new, status_msg = clone_submission_repo(
+            submissions_dir=submissions_dir,
+            student_dir_name=directorio_destino,
+            repo_url=repo_url,
+        )
+        meta = get_repo_metadata(repo_path)
+        if is_new:
+            console.print(f"[bold green]✓ Repositorio clonado exitosamente en:[/bold green] [cyan]{repo_path}[/cyan]")
+        else:
+            console.print(f"[bold green]✓ Repositorio actualizado ({status_msg}):[/bold green] [cyan]{repo_path}[/cyan]")
+        console.print(f"  Rama: [yellow]{meta.branch}[/yellow] | Commit: [bold]{meta.revision}[/bold] ({meta.full_hash[:12]})")
+        if meta.author:
+            console.print(f"  Autor: [dim]{meta.author}[/dim] | Mensaje: [dim]{meta.commit_message}[/dim]")
+    except Exception as e:
+        console.print(f"[bold red]Error al clonar entrega de GitHub:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+
+@github_app.command("comment")
 def cmd_comment(
     exercise: str = typer.Argument(..., help="Nombre de la actividad."),
     student: str = typer.Argument(..., help="Nombre de usuario del estudiante."),
@@ -498,7 +533,7 @@ def cmd_plagiarism(
         console.print(f"\n[bold green]✓ Reporte HTML interactivo generado en:[/bold green] [cyan]{html}[/cyan]\n")
 
 
-@app.command("pr-fix")
+@github_app.command("pr-fix")
 def cmd_pr_fix(
     exercise: str = typer.Argument(..., help="Nombre de la actividad."),
     student: str = typer.Argument(..., help="Nombre de usuario del estudiante."),

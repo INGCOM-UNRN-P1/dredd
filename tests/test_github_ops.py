@@ -77,3 +77,44 @@ def test_clone_submission_repo_new_and_update(tmp_path: Path):
     )
     assert is_new_3 is False
     assert (repo_path_3 / "nuevo.c").is_file()
+
+
+def test_cli_github_help_and_moved_commands():
+    from typer.testing import CliRunner
+    from dredd.cli import app
+
+    runner = CliRunner()
+    res_root = runner.invoke(app, ["--help"])
+    assert res_root.exit_code == 0
+    assert "github" in res_root.output
+    # comment y pr-fix ya no deben figurar como comandos raíz directos
+    assert "\n  comment " not in res_root.output
+    assert "\n  pr-fix " not in res_root.output
+
+    res_gh = runner.invoke(app, ["github", "--help"])
+    assert res_gh.exit_code == 0
+    assert "clone" in res_gh.output
+    assert "comment" in res_gh.output
+    assert "pr-fix" in res_gh.output
+
+
+def test_cli_github_clone_invocation(tmp_path: Path, monkeypatch):
+    from typer.testing import CliRunner
+    from dredd.cli import app
+
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    remote = tmp_path / "remote_tp0"
+    _create_git_repo(remote, filename="hola.c", content="int main(void) { return 0; }\n")
+
+    res = runner.invoke(app, ["github", "clone", "TP0", "TP0-Enehuen", str(remote)])
+    assert res.exit_code == 0
+    assert "TP0-Enehuen" in res.output
+
+    cloned_repo = tmp_path / "TP0-submissions" / "TP0-Enehuen" / "repo"
+    if not cloned_repo.exists():
+        cloned_repo = tmp_path / "TP0" / "TP0-Enehuen" / "repo"
+    assert cloned_repo.is_dir()
+    assert (cloned_repo / "hola.c").is_file()
+
