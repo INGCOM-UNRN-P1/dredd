@@ -101,18 +101,11 @@ def ensure_submission_repo(
     sub_dir.mkdir(parents=True, exist_ok=True)
     repo_path = sub_dir / student
 
-    if repo_path.is_dir() and (repo_path / ".git").is_dir():
-        # Actualización limpia
-        subprocess.run(["git", "-C", str(repo_path), "restore", "*"], capture_output=True)
-        subprocess.run(["git", "-C", str(repo_path), "reset", "--hard", "HEAD"], capture_output=True)
-        pull_res = subprocess.run(["git", "-C", str(repo_path), "pull"], capture_output=True, text=True)
-        if pull_res.returncode != 0:
-            raise RuntimeError(f"Error al actualizar '{student}' con git pull: {pull_res.stderr.strip()}")
-    elif repo_path.is_dir():
-        # Directorio local preexistente (entregas locales / Moodle descompactadas)
+    if repo_path.is_dir():
+        # Directorio local preexistente: nunca ejecutar git pull durante la evaluación
         return repo_path
     else:
-        # Clonación inicial desde GitHub
+        # Clonación inicial desde GitHub únicamente si no existe localmente
         repo_url = f"https://github.com/{org}/{student}.git"
         clone_res = subprocess.run(["git", "clone", repo_url, str(repo_path)], capture_output=True, text=True)
         if clone_res.returncode != 0:

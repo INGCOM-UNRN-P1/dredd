@@ -127,8 +127,8 @@ def ejecutar_evaluacion(
         all_candidates = [
             d.name for d in sorted(submissions_dir.iterdir())
             if d.is_dir()
-            and not d.name.startswith((".", "_"))
-            and d.name not in ("guia", "guide", "templates", "informe", "baseline", "_baseline")
+            and not d.name.startswith((".", "_", "i_"))
+            and d.name not in ("guia", "guide", "templates", "informe", "informes", "baseline", "_baseline")
         ]
         if failed_only:
             target_students = [
@@ -180,6 +180,11 @@ def ejecutar_evaluacion(
             meta = get_repo_metadata(repo_sub)
             shorthash = meta.revision or meta.full_hash[:7] or "latest"
             all_revs = [(shorthash, repo_sub)]
+            is_github_repo_mode = True
+        elif (repo_path / ".git").is_dir():
+            meta = get_repo_metadata(repo_path)
+            shorthash = meta.revision or meta.full_hash[:7] or "latest"
+            all_revs = [(shorthash, repo_path)]
             is_github_repo_mode = True
         else:
             from dredd.core.reformat import reformat_submission_to_rn_f, find_existing_revision_folders

@@ -175,3 +175,102 @@ def test_eval_with_github_repo_and_shorthash(tmp_path: Path, monkeypatch):
     assert i_dir1.is_dir()
 
 
+def test_eval_individual_student_without_git_pull(tmp_path: Path, monkeypatch):
+    from typer.testing import CliRunner
+    from dredd.cli import app
+
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    tp_dir = tmp_path / "TP0"
+    tp_dir.mkdir()
+    student_dir = tp_dir / "TP0-Enehuen"
+    student_dir.mkdir()
+    repo_dir = student_dir / "repo"
+
+    sha = _create_git_repo(repo_dir, filename="main.c", content="int main(void) { return 0; }\n")
+    short_sha = sha[:7]
+
+    # Crear una modificación local sin commitear
+    local_uncommitted = repo_dir / "uncommitted.txt"
+    local_uncommitted.write_text("trabajo en progreso local")
+
+    # Modificar main.c localmente sin commit
+    (repo_dir / "main.c").write_text("int main(void) { return 100; }\n")
+
+    # Evaluar específicamente a TP0-Enehuen
+    res = runner.invoke(app, ["eval", "TP0", "TP0-Enehuen"])
+    assert res.exit_code == 0
+    assert "TP0-Enehuen" in res.output
+
+    # Verificar que NO se hizo git reset/restore/pull: el archivo sin commitear y la modificación persisten
+    assert local_uncommitted.is_file()
+    assert "return 100;" in (repo_dir / "main.c").read_text()
+
+    # Verificar que se generó el informe y la carpeta intermedia
+    rep = student_dir / f"TP0-Enehuen_{short_sha}.md"
+    i_dir = student_dir / f"i_{short_sha}"
+    assert rep.is_file()
+    assert i_dir.is_dir()
+
+
+def test_eval_all_students_ignores_intermediate_and_special_folders(tmp_path: Path, monkeypatch):
+    from typer.testing import CliRunner
+    from dredd.cli import app
+
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    tp_dir = tmp_path / "TP0"
+    tp_dir.mkdir()
+
+    # Estudiante 1
+    est1 = tp_dir / "TP0-Alumno1"
+    est1.mkdir()
+    _create_git_repo(est1 / "repo", filename="main.c", content="int main(void) { return 0; }\n")
+
+    # Estudiante 2
+    est2 = tp_dir / "TP0-Alumno2"
+    est2.mkdir()
+    _create_git_repo(est2 / "repo", filename="main.c", content="int main(void) { return 0; }\n")
+
+    # Carpetas auxiliares / intermedias que deben ser ignoradas por --all
+    (tp_dir / "i_abcdef1").mkdir()
+    (tp_dir / "informes").mkdir()
+    (tp_dir / "_baseline").mkdir()
+
+    res = runner.invoke(app, ["eval", "TP0", "--all"])
+    assert res.exit_code == 0
+    assert "TP0-Alumno1" in res.output
+    assert "TP0-Alumno2" in res.output
+    assert "i_abcdef1" not in res.output
+
+
+def test_eval_with_root_git_repo(tmp_path: Path, monkeypatch):
+    from typer.testing import CliRunner
+    from dredd.cli import app
+
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    tp_dir = tmp_path / "TP0"
+    tp_dir.mkdir()
+    student_dir = tp_dir / "TP0-AlumnoDirecto"
+
+    # Repositorio Git directamente en la raíz de la carpeta del estudiante (sin subcarpeta repo)
+    sha = _create_git_repo(student_dir, filename="main.c", content="int main(void) { return 0; }\n")
+    short_sha = sha[:7]
+
+    res = runner.invoke(app, ["eval", "TP0", "TP0-AlumnoDirecto"])
+    assert res.exit_code == 0
+    assert "TP0-AlumnoDirecto" in res.output
+
+    # Debe generar reporte con shorthash e i_<shorthash> sin corromper la raíz con r1
+    rep = student_dir / f"TP0-AlumnoDirecto_{short_sha}.md"
+    i_dir = student_dir / f"i_{short_sha}"
+    assert rep.is_file()
+    assert i_dir.is_dir()
+    assert not (student_dir / "r1").exists()
+
+
+
