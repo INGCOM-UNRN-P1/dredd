@@ -175,14 +175,31 @@ def ejecutar_evaluacion(
             table.add_row(s_name, "[red]ERROR[/red]", "—", "—", "No generado")
             continue
 
-        from dredd.core.reformat import reformat_submission_to_rn_f, find_existing_revision_folders
-        reformat_submission_to_rn_f(repo_path)
-        all_revs = find_existing_revision_folders(repo_path)
-        if not all_revs:
-            all_revs = [(1, repo_path)]
+        repo_sub = repo_path / "repo"
+        if repo_sub.is_dir():
+            meta = get_repo_metadata(repo_sub)
+            shorthash = meta.revision or meta.full_hash[:7] or "latest"
+            all_revs = [(shorthash, repo_sub)]
+            is_github_repo_mode = True
+        else:
+            from dredd.core.reformat import reformat_submission_to_rn_f, find_existing_revision_folders
+            reformat_submission_to_rn_f(repo_path)
+            all_revs = find_existing_revision_folders(repo_path)
+            if not all_revs:
+                all_revs = [(1, repo_path)]
+            is_github_repo_mode = False
 
-        for rev_num, r_path in all_revs:
-            rev_str = f"r{rev_num}"
+        for rev_identifier, r_path in all_revs:
+            if is_github_repo_mode:
+                shorthash = str(rev_identifier)
+                rev_str = shorthash
+                intermediate_dir = repo_path / f"i_{shorthash}"
+                report_file = repo_path / f"{s_name}_{shorthash}.md"
+            else:
+                rev_str = f"r{rev_identifier}"
+                intermediate_dir = repo_path / f"r{rev_identifier}i"
+                report_file = repo_path / f"{s_name}_{rev_str}.md"
+
             meta = get_repo_metadata(r_path)
             analysis = run_ripley_analysis(
                 r_path,
@@ -193,7 +210,6 @@ def ejecutar_evaluacion(
                 baseline_dir=baseline,
             )
 
-            report_file = repo_path / f"{s_name}_{rev_str}.md"
             generate_student_report(
                 exercise=exercise_slug,
                 student=s_name,
@@ -204,6 +220,7 @@ def ejecutar_evaluacion(
                 output_file=report_file,
                 revision=rev_str,
                 guide=guide,
+                intermediate_dir=intermediate_dir,
             )
 
             comp_ok = analysis.get("compilation", {}).get("success", False)

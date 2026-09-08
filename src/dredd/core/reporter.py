@@ -343,8 +343,11 @@ def write_individual_tool_reports(
         comp_lines.append(comp["raw_stderr"][:1200])
         comp_lines.append("```")
 
-    m_rev = re.search(r"\d+", rni_dir.name)
-    r_tag = f"r{m_rev.group(0)}" if m_rev else "r1"
+    if rni_dir.name.startswith("i_"):
+        r_tag = rni_dir.name[2:]
+    else:
+        m_rev = re.search(r"\d+", rni_dir.name)
+        r_tag = f"r{m_rev.group(0)}" if m_rev else "r1"
     comp_lines.append(f"\n> 📄 **Salida completa de compilación:** registrada en `compilacion_{r_tag}.log`.")
 
     daed_path = rni_dir / "daedalus.md"
@@ -546,7 +549,15 @@ def generate_consolidated_report_from_rni(
     # 2. Metadatos de Repositorio y Guía
     lines.append("\n## Repositorio")
     lines.append(f"**branch/revision:** `{metadata.branch}` `{metadata.revision}`")
-    lines.append(f"**Fecha:** {metadata.date_str}")
+    if getattr(metadata, "full_hash", None):
+        lines.append(f"**Commit SHA:** `{metadata.full_hash}`")
+    if getattr(metadata, "author", None):
+        lines.append(f"**Autor:** `{metadata.author}`")
+    if getattr(metadata, "commit_date", None):
+        lines.append(f"**Fecha del commit:** `{metadata.commit_date}`")
+    if getattr(metadata, "commit_message", None):
+        lines.append(f"**Mensaje:** `{metadata.commit_message}`")
+    lines.append(f"**Fecha de evaluación:** {metadata.date_str}")
     if revision:
         lines.append(f"**Versión revisada:** `{revision}`")
 
@@ -741,7 +752,11 @@ def save_compilation_log(
 ) -> List[Path]:
     """Guarda la salida completa de la compilación en output_dir con número de revisión."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    rev_str = revision if str(revision).startswith("r") else f"r{revision}"
+    rev_raw = str(revision)
+    if rev_raw.startswith("r") or len(rev_raw) >= 5 or not rev_raw.isdigit():
+        rev_str = rev_raw
+    else:
+        rev_str = f"r{rev_raw}"
     log_content = build_full_compilation_log(
         analysis=analysis,
         revision=rev_str,
@@ -751,7 +766,7 @@ def save_compilation_log(
 
     saved_paths: List[Path] = []
 
-    # 1. Nombre canónico: compilacion_<revision>.log (ej: compilacion_r1.log)
+    # 1. Nombre canónico: compilacion_<revision>.log (ej: compilacion_r1.log o compilacion_a1b2c3d.log)
     canonical_file = output_dir / f"compilacion_{rev_str}.log"
     canonical_file.write_text(log_content, encoding="utf-8")
     saved_paths.append(canonical_file)
@@ -766,7 +781,7 @@ def save_compilation_log(
 
     # 3. Si output_stem difiere (ej: informe_r1_compilacion.log)
     if output_stem:
-        stem_clean = re.sub(r"_r\d+$", "", output_stem, flags=re.IGNORECASE)
+        stem_clean = re.sub(r"_(?:r\d+|[0-9a-f]{6,40})$", "", output_stem, flags=re.IGNORECASE)
         stem_file = output_dir / f"{stem_clean}_{rev_str}_compilacion.log"
         if stem_file not in saved_paths:
             stem_file.write_text(log_content, encoding="utf-8")
@@ -785,15 +800,20 @@ def generate_student_report(
     output_file: Path,
     revision: Optional[str] = None,
     guide: Optional[Any] = None,
+    intermediate_dir: Optional[Path] = None,
 ) -> str:
-    """Genera los informes individuales por herramienta en rNi y el informe consolidado final."""
+    """Genera los informes individuales por herramienta en rNi o i_<hash> y el informe consolidado final."""
     student_dir = repo_path.parent if re.match(r"^r\d+(?:_f)?$", repo_path.name, re.IGNORECASE) else repo_path
     rev_str = revision or resolve_submission_revision(repo_path, student)
-    m_num = re.search(r"\d+", rev_str)
-    rev_num = m_num.group(0) if m_num else "1"
-    rev_tag = f"r{rev_num}"
 
-    rni_dir = student_dir / f"r{rev_num}i"
+    if intermediate_dir:
+        rni_dir = intermediate_dir
+        rev_tag = rev_str
+    else:
+        m_num = re.search(r"\d+", rev_str)
+        rev_num = m_num.group(0) if m_num else "1"
+        rev_tag = f"r{rev_num}"
+        rni_dir = student_dir / f"r{rev_num}i"
 
     # 1. Guardar la salida completa de la compilación en la misma ubicación que el informe
     save_compilation_log(

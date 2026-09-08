@@ -118,3 +118,60 @@ def test_cli_github_clone_invocation(tmp_path: Path, monkeypatch):
     assert cloned_repo.is_dir()
     assert (cloned_repo / "hola.c").is_file()
 
+
+def test_eval_with_github_repo_and_shorthash(tmp_path: Path, monkeypatch):
+    from typer.testing import CliRunner
+    from dredd.cli import app
+
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    tp_dir = tmp_path / "TP0"
+    tp_dir.mkdir()
+    student_dir = tp_dir / "TP0-Enehuen"
+    student_dir.mkdir()
+    repo_dir = student_dir / "repo"
+
+    sha1 = _create_git_repo(repo_dir, filename="main.c", content="int main(void) { return 0; }\n")
+    short1 = sha1[:7]
+
+    # Ejecutar primera evaluación
+    res = runner.invoke(app, ["eval", "TP0", "--all"])
+    assert res.exit_code == 0
+    assert "TP0-Enehuen" in res.output
+
+    # Debe haberse creado el directorio i_<shorthash> y el informe con shorthash
+    i_dir1 = student_dir / f"i_{short1}"
+    rep1 = student_dir / f"TP0-Enehuen_{short1}.md"
+    assert i_dir1.is_dir()
+    assert rep1.is_file()
+    txt1 = rep1.read_text(encoding="utf-8")
+    assert sha1 in txt1
+    assert short1 in txt1
+
+    # Re-evaluar mismo commit (idempotente: reemplaza sin crear otra carpeta)
+    res_same = runner.invoke(app, ["eval", "TP0", "--all"])
+    assert res_same.exit_code == 0
+    assert rep1.is_file()
+
+    # Nuevo commit
+    (repo_dir / "otro.c").write_text("void otro(void) {}\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "Commit 2"], cwd=repo_dir, check=True, capture_output=True)
+    sha2 = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_dir, check=True, capture_output=True, text=True).stdout.strip()
+    short2 = sha2[:7]
+    assert short2 != short1
+
+    # Evaluar con nuevo commit
+    res_new = runner.invoke(app, ["eval", "TP0", "--all"])
+    assert res_new.exit_code == 0
+
+    i_dir2 = student_dir / f"i_{short2}"
+    rep2 = student_dir / f"TP0-Enehuen_{short2}.md"
+    assert i_dir2.is_dir()
+    assert rep2.is_file()
+    # Ambos informes deben conservarse
+    assert rep1.is_file()
+    assert i_dir1.is_dir()
+
+
