@@ -11,6 +11,10 @@ from typing import Dict, List, Optional
 class RepoMetadata:
     branch: str = "main"
     revision: str = ""
+    full_hash: str = ""
+    author: str = ""
+    commit_date: str = ""
+    commit_message: str = ""
     date_str: str = ""
     files_list: str = ""
     recent_commits: List[str] = field(default_factory=list)
@@ -175,6 +179,30 @@ def get_repo_metadata(repo_path: Path) -> RepoMetadata:
     )
     revision = rev_proc.stdout.strip() or "unknown"
 
+    full_hash_proc = subprocess.run(
+        ["git", "-C", str(repo_path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    full_hash = full_hash_proc.stdout.strip() or revision
+
+    info_proc = subprocess.run(
+        ["git", "-C", str(repo_path), "log", "-1", "--format=%an|%ad|%s", "--date=iso"],
+        capture_output=True,
+        text=True,
+    )
+    author = ""
+    commit_date = ""
+    commit_message = ""
+    if info_proc.returncode == 0 and info_proc.stdout.strip():
+        parts = info_proc.stdout.strip().split("|", 2)
+        if len(parts) >= 1:
+            author = parts[0]
+        if len(parts) >= 2:
+            commit_date = parts[1]
+        if len(parts) >= 3:
+            commit_message = parts[2]
+
     log_proc = subprocess.run(
         ["git", "-C", str(repo_path), "log", "-n", "5", "--oneline"],
         capture_output=True,
@@ -185,7 +213,54 @@ def get_repo_metadata(repo_path: Path) -> RepoMetadata:
     return RepoMetadata(
         branch=branch,
         revision=revision,
+        full_hash=full_hash,
+        author=author,
+        commit_date=commit_date,
+        commit_message=commit_message,
         date_str=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         files_list=tree_output,
         recent_commits=commits,
     )
+
+
+def clone_submission_repo(
+    submissions_dir: Path,
+    student_dir_name: str,
+    repo_url: str,
+) -> tuple[Path, bool, str]:
+    """Clona o actualiza el repositorio del estudiante en <submissions_dir>/<student_dir_name>/repo.
+
+    Retorna:
+        tuple (repo_path, is_new_clone, status_message)
+    """
+    sub_dir = Path(submissions_dir)
+    student_dir = sub_dir / student_dir_name
+    student_dir.mkdir(parents=True, exist_ok=True)
+    repo_dir = student_dir / "repo"
+
+    if (repo_dir / ".git").is_dir():
+        fetch_res = subprocess.run(["git", "-C", str(repo_dir), "fetch"], capture_output=True, text=True)
+        if fetch_res.returncode != 0:
+            raise RuntimeError(f"Error en git fetch para '{student_dir_name}': {fetch_res.stderr.strip()}")
+
+        pull_res = subprocess.run(["git", "-C", str(repo_dir), "pull"], capture_output=True, text=True)
+        if pull_res.returncode != 0:
+            raise RuntimeError(f"Error en git pull para '{student_dir_name}': {pull_res.stderr.strip()}")
+
+        msg = pull_res.stdout.strip()
+        is_updated = "Already up to date" not in msg and "Ya está actualizado" not in msg
+        status_msg = "Actualizado con nuevos commits" if is_updated else "Ya actualizado al último commit"
+        return repo_dir, False, status_msg
+    else:
+        if repo_dir.exists():
+            import shutil
+            shutil.rmtree(repo_dir, ignore_errors=True)
+
+        clone_res = subprocess.run(["git", "clone", repo_url, str(repo_dir)], capture_output=True, text=True)
+        if clone_res.returncode != 0:
+            if repo_dir.exists():
+                import shutil
+                shutil.rmtree(repo_dir, ignore_errors=True)
+            raise RuntimeError(f"Error al clonar '{repo_url}': {clone_res.stderr.strip()}")
+
+        return repo_dir, True, "Clonado exitosamente"
