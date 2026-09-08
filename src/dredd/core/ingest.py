@@ -195,6 +195,9 @@ class ParsedMoodleZip:
     activity_name: str
     activity_id: str
     activity_slug: str
+    is_unknown_activity: bool = False
+    config_created_or_updated: bool = False
+    warning_message: str = ""
 
 
 @dataclass
@@ -339,7 +342,7 @@ class MoodleIngestor:
         # Verificar si hay regla de mapeo en dredd.yaml
         from dredd.core.config import load_dredd_config
         cfg = load_dredd_config(self.workspace_dir)
-        rule = cfg.find_mapping_for_zip(zip_file_path.name) if cfg else None
+        rule = (cfg.find_mapping_for_zip(zip_file_path.name) or cfg.find_mapping_for_activity(moodle_info.activity_slug)) if cfg else None
 
         if rule:
             moodle_info.activity_slug = rule.entrega
@@ -351,7 +354,46 @@ class MoodleIngestor:
             else:
                 activity_dir = self.workspace_dir / rule.entrega
         else:
-            activity_dir = self.workspace_dir / moodle_info.activity_slug
+            moodle_info.is_unknown_activity = True
+            cfg_file = (cfg.config_path if cfg and cfg.config_path else (self.workspace_dir / "dredd.yaml"))
+
+            clean_act = re.sub(r"[^a-zA-Z0-9]+", "*", moodle_info.activity_name.lower()).strip("*")
+            zip_pat = f"*{clean_act}*.zip" if clean_act else f"*{zip_file_path.name}"
+
+            from dredd.core.config import DreddConfig, WorkspaceSettings, ToolChecksConfig, MappingRule
+            if cfg is None:
+                cfg = DreddConfig(
+                    workspace=WorkspaceSettings(),
+                    checks=ToolChecksConfig(),
+                    mapeos=[],
+                    config_path=cfg_file,
+                )
+
+            guias_dir = cfg.workspace.guias_dir or "guias"
+            skeleton_rule = MappingRule(
+                zip_pattern=zip_pat,
+                entrega=moodle_info.activity_slug,
+                guia=f"{guias_dir}/{moodle_info.activity_slug}/guia.yaml",
+                titulo=moodle_info.activity_name,
+                descripcion="Configuración autogenerada para práctica desconocida. Debe ser ajustada.",
+                mode="archivos_individuales",
+            )
+            cfg.add_or_update_mapping(skeleton_rule)
+
+            if not dry_run:
+                cfg.save(cfg_file)
+                moodle_info.config_created_or_updated = True
+
+            moodle_info.warning_message = (
+                f"Práctica desconocida '{moodle_info.activity_name}' detectada. "
+                f"Se creó un esqueleto de configuración en '{cfg_file}' que debe ser ajustado."
+            )
+
+            sub_dir_name = cfg.workspace.submissions_dir if cfg else ""
+            if sub_dir_name and (self.workspace_dir / sub_dir_name).is_dir():
+                activity_dir = self.workspace_dir / sub_dir_name / moodle_info.activity_slug
+            else:
+                activity_dir = self.workspace_dir / moodle_info.activity_slug
 
         with zipfile.ZipFile(zip_file_path, "r") as zf:
             namelist = zf.namelist()

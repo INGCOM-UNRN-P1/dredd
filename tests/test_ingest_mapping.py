@@ -135,3 +135,84 @@ def test_moodle_ingestor_process_zip_force(tmp_path: Path):
     assert results2[0].version_created == 1
     assert (tmp_path / info2.activity_slug / "perez-juan_102" / "r1" / "main.c").exists()
 
+
+def test_moodle_ingestor_unknown_activity_creates_skeleton(tmp_path: Path):
+    from dredd.core.config import load_dredd_config
+
+    zip_path = tmp_path / "Entrega #4-1240320.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr(
+            "Alvarez Juan_101_assignsubmission_file/main.c",
+            "int main(void) { return 0; }\n",
+        )
+
+    ingestor = MoodleIngestor(workspace_dir=tmp_path)
+    info, results = ingestor.process_zip(zip_path)
+
+    assert info.is_unknown_activity is True
+    assert info.config_created_or_updated is True
+    assert "debe ser ajustad" in info.warning_message.lower()
+
+    cfg_path = tmp_path / "dredd.yaml"
+    assert cfg_path.is_file()
+
+    cfg = load_dredd_config(tmp_path)
+    assert cfg is not None
+    rule = cfg.find_mapping_for_activity(info.activity_slug)
+    assert rule is not None
+    assert rule.entrega == info.activity_slug
+    assert rule.titulo == info.activity_name
+    assert rule.mode == "archivos_individuales"
+    assert "guias" in (rule.guia or "")
+    assert rule.matches_zip(zip_path.name)
+
+
+def test_moodle_ingestor_unknown_activity_appends_to_existing_config(tmp_path: Path):
+    from dredd.core.config import load_dredd_config, init_workspace
+
+    init_workspace(tmp_path)
+    cfg_before = load_dredd_config(tmp_path)
+    assert cfg_before is not None
+    initial_mappings_count = len(cfg_before.mapeos)
+
+    zip_path = tmp_path / "Entrega #9-9999999.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr(
+            "Gomez Luis_105_assignsubmission_file/main.c",
+            "int main(void) { return 0; }\n",
+        )
+
+    ingestor = MoodleIngestor(workspace_dir=tmp_path)
+    info, results = ingestor.process_zip(zip_path)
+
+    assert info.is_unknown_activity is True
+    cfg_after = load_dredd_config(tmp_path)
+    assert cfg_after is not None
+    assert len(cfg_after.mapeos) == initial_mappings_count + 1
+
+    rule = cfg_after.find_mapping_for_activity(info.activity_slug)
+    assert rule is not None
+    assert rule.entrega == info.activity_slug
+
+
+def test_cli_moodle_ingest_unknown_warning(tmp_path: Path, monkeypatch):
+    from typer.testing import CliRunner
+    from dredd.cli import app
+
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    zip_path = tmp_path / "TP_Especial-55555.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr(
+            "Perez Juan_101_assignsubmission_file/main.c",
+            "int main(void) { return 0; }\n",
+        )
+
+    res = runner.invoke(app, ["moodle", "ingest", str(zip_path)])
+    assert res.exit_code == 0
+    assert "ADVERTENCIA: Práctica desconocida detectada" in res.output
+    assert "debe ser ajustada" in res.output.lower()
+    assert (tmp_path / "dredd.yaml").is_file()
+
+

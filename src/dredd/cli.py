@@ -633,6 +633,15 @@ def cmd_moodle_ingest(
     console.print(f"  · Estudiantes procesados: {len(results)}")
     console.print(f"  · Nuevas revisiones creadas: {new_revs}\n")
 
+    if info.is_unknown_activity:
+        console.print("[bold yellow]⚠ ADVERTENCIA: Práctica desconocida detectada[/bold yellow]")
+        console.print(f"  • La actividad '{info.activity_name}' ({info.activity_slug}) no contaba con configuración previa en dredd.yaml.")
+        console.print("  • Se generó un esqueleto de configuración en [cyan]dredd.yaml[/cyan].")
+        console.print("  • [bold red]¡ATENCIÓN![/bold red] La configuración debe ser ajustada antes de evaluar:")
+        console.print("      1. Asociá la guía Deckard en 'guia:' (ej. guias/<actividad>/guia.yaml).")
+        console.print("      2. Verificá o ajustá el modo de construcción en 'mode:' ('archivos_individuales', 'makefiles_individuales' o 'proyecto').")
+        console.print("      3. Ajustá las políticas de verificación en 'checks:' si corresponde.\n")
+
 
 @app.command("export")
 def cmd_export(
