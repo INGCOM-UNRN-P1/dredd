@@ -76,7 +76,7 @@ dredd github clone <practica> <directorio_destino> <repo_url>
 
 ### 3.3. Comandos `dredd github comment` y `dredd github pr-fix`
 * Se vinculan a las funciones existentes `cmd_comment` y `cmd_pr_fix`.
-* Los comandos en raíz `dredd comment` y `dredd pr-fix` se preservan como alias hacia `github_app` para garantizar retrocompatibilidad.
+* Los comandos en raíz `dredd comment` y `dredd pr-fix` no se preservan en su ubicación original.
 
 ---
 
