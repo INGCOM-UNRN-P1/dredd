@@ -155,3 +155,36 @@ def test_cli_eval_clean_alias(tmp_path: Path):
     assert "Directorios rNi eliminados: 1" in res.stdout
     assert not (a1 / "r1i").exists()
     assert not (a1 / "alumno_x_r1.md").exists()
+
+
+def test_cli_eval_flag_clean_and_force(tmp_path: Path, monkeypatch):
+    entregas = tmp_path / "tp03"
+    a1 = entregas / "alumno_y"
+    a1.mkdir(parents=True)
+    (a1 / "main.c").write_text("int main(){return 0;}")
+    (a1 / "r1i").mkdir()
+    (a1 / "alumno_y_r1.md").write_text("informe viejo")
+
+    # Mock de ejecutar_evaluacion para probar que el flag --clean invoca la limpieza previa
+    called = []
+    def mock_ejecutar_evaluacion(**kwargs):
+        called.append(kwargs)
+
+    import dredd.cli
+    monkeypatch.setattr(dredd.cli, "ejecutar_evaluacion", mock_ejecutar_evaluacion)
+
+    res = runner.invoke(app, ["eval", str(entregas), "--clean"])
+    assert res.exit_code == 0
+    assert not (a1 / "r1i").exists()
+    assert not (a1 / "alumno_y_r1.md").exists()
+    assert len(called) == 1
+
+    # Recrear y probar --force
+    (a1 / "r1i").mkdir()
+    (a1 / "alumno_y_r1.md").write_text("informe viejo 2")
+    res_force = runner.invoke(app, ["eval", str(entregas), "--force"])
+    assert res_force.exit_code == 0
+    assert not (a1 / "r1i").exists()
+    assert not (a1 / "alumno_y_r1.md").exists()
+    assert len(called) == 2
+

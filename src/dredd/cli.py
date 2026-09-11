@@ -276,6 +276,18 @@ def cmd_eval(
         "-b",
         help="Directorio de línea base (_baseline) con las plantillas originales para omitir ejercicios sin completar.",
     ),
+    clean: bool = typer.Option(
+        False,
+        "--clean",
+        "-c",
+        help="Limpia directorios de evaluación (rNi) e informes previos antes de volver a evaluar.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Fuerza la re-evaluación completa eliminando resultados previos de las carpetas de estudiantes.",
+    ),
 ) -> None:
     """Clona/actualiza el repositorio o evalúa entregas locales, ejecuta el análisis con Ripley y genera el informe Markdown."""
     if exercise == "clean":
@@ -286,6 +298,14 @@ def cmd_eval(
             dry_run=dry_run,
         )
         return
+
+    if clean or force:
+        ejecutar_limpieza_evaluaciones(
+            exercise=exercise,
+            student=student,
+            all_students=all_students,
+            dry_run=False,
+        )
 
     ejecutar_evaluacion(
         exercise=exercise,
@@ -441,8 +461,28 @@ def cmd_evaluate_run(
         "--dry-run",
         help="Modo Dry Run: evalúa únicamente una muestra de hasta 3 estudiantes representativos antes del lote completo.",
     ),
+    clean: bool = typer.Option(
+        False,
+        "--clean",
+        "-c",
+        help="Limpia directorios de evaluación (rNi) e informes previos antes de volver a evaluar.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Fuerza la re-evaluación completa eliminando resultados previos de las carpetas de estudiantes.",
+    ),
 ) -> None:
     """Clona/actualiza el repositorio o evalúa entregas locales, ejecuta el análisis con Ripley y genera el informe Markdown."""
+    if clean or force:
+        ejecutar_limpieza_evaluaciones(
+            exercise=exercise,
+            student=student,
+            all_students=all_students,
+            dry_run=False,
+        )
+
     ejecutar_evaluacion(
         exercise=exercise,
         student=student,
