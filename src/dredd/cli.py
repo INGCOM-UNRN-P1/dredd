@@ -5,6 +5,7 @@ from typing import Any, List, Optional
 import typer
 from rich.console import Console
 from rich.table import Table
+from rich.panel import Panel
 
 from dredd.core.git_ops import ensure_submission_repo, get_repo_metadata, resolve_submissions_dir
 from dredd.core.github_api import open_pr_in_browser, post_pr_comment
@@ -1326,6 +1327,273 @@ def cmd_diff_submission(
                 title=f"Diff: {a.nombre}",
                 border_style="dim",
             ))
+
+
+# ---------------------------------------------------------------------------
+# Nuevas Mejoras QoL: late-penalty, audit-makefile, typology, eval-stability,
+# cohort-bench, smith-adversary, eval-shielded
+# ---------------------------------------------------------------------------
+
+
+@app.command("late-penalty")
+def cmd_late_penalty(
+    fecha_entrega: str = typer.Argument(..., help="Fecha y hora de entrega (ISO o 'YYYY-MM-DD HH:MM')."),
+    fecha_limite: str = typer.Argument(..., help="Fecha y hora límite de entrega (ISO o 'YYYY-MM-DD HH:MM')."),
+    nota: float = typer.Option(10.0, "--nota", "-n", help="Calificación base antes de la penalización."),
+    gracia: int = typer.Option(15, "--gracia", "-g", help="Minutos de gracia sin penalización."),
+    tasa: float = typer.Option(0.25, "--tasa", "-t", help="Puntos de descuento por cada hora de retraso."),
+    max_descuento: float = typer.Option(4.0, "--max-descuento", "-m", help="Tope máximo de puntos de descuento."),
+    json_output: bool = typer.Option(False, "--json", help="Emitir resultado en formato JSON."),
+) -> None:
+    """Calcula la penalización gradual por entrega fuera de término."""
+    from datetime import datetime
+    import json
+    from dredd.core.late_penalty import calcular_penalizacion_entrega
+
+    def parse_dt(s: str) -> datetime:
+        try:
+            return datetime.fromisoformat(s)
+        except Exception:
+            return datetime.strptime(s, "%Y-%m-%d %H:%M")
+
+    dt_entrega = parse_dt(fecha_entrega)
+    dt_limite = parse_dt(fecha_limite)
+
+    info = calcular_penalizacion_entrega(
+        fecha_entrega=dt_entrega,
+        fecha_limite=dt_limite,
+        nota_original=nota,
+        gracia_minutos=gracia,
+        puntos_por_hora=tasa,
+        max_descuento=max_descuento,
+    )
+
+    if json_output:
+        print(json.dumps(info.to_dict(), indent=2, ensure_ascii=False))
+        return
+
+    color = "green" if info.a_tiempo else "yellow" if info.puntos_descuento < max_descuento else "red"
+    console.print(Panel(
+        f"• **Estado:** [{color}]{'A tiempo' if info.a_tiempo else 'Fuera de término'}[/{color}]\n"
+        f"• **Minutos de retraso:** {info.minutos_retraso:.1f} min ({info.horas_retraso:.2f} h)\n"
+        f"• **Descuento aplicado:** -{info.puntos_descuento:.2f} pts\n"
+        f"• **Nota ajustada:** [bold {color}]{info.nota_final:.2f} / {info.nota_original:.2f}[/bold {color}]\n\n"
+        f"_{info.detalle}_",
+        title="[bold cyan]Dredd Late Penalty Calculator[/bold cyan]",
+        border_style=color,
+    ))
+
+
+@app.command("audit-makefile")
+def cmd_audit_makefile(
+    objetivo: Path = typer.Argument(..., help="Ruta al archivo Makefile o al directorio de la entrega."),
+    json_output: bool = typer.Option(False, "--json", help="Salida en formato JSON."),
+) -> None:
+    """Audita Makefiles en busca de dependencias prohibidas, flags suprimidas y trampas."""
+    import json
+    from dredd.core.makefile_audit import auditar_makefile
+
+    mk_path = objetivo if objetivo.is_file() else (objetivo / "Makefile" if (objetivo / "Makefile").is_file() else objetivo / "makefile")
+    if not mk_path.is_file():
+        console.print(f"[bold red]No se encontró archivo Makefile en:[/bold red] {objetivo}")
+        raise typer.Exit(code=1)
+
+    findings = auditar_makefile(mk_path)
+    if json_output:
+        print(json.dumps([f.to_dict() for f in findings], indent=2, ensure_ascii=False))
+        return
+
+    if not findings:
+        console.print(f"[bold green]✓ Makefile conforme:[/bold green] Sin dependencias prohibidas ni trampas detectadas en {mk_path}.")
+        return
+
+    tabla = Table(title=f"Auditoría de Makefile: {mk_path.name}", border_style="red")
+    tabla.add_column("Línea", justify="right", style="cyan")
+    tabla.add_column("Severidad", justify="center")
+    tabla.add_column("Regla", style="bold")
+    tabla.add_column("Mensaje")
+    tabla.add_column("Código", style="dim")
+
+    for f in findings:
+        sev_style = "[bold red]TRAMPA[/bold red]" if f.severidad == "TRAMPA" else "[red]ERROR[/red]" if f.severidad == "ERROR" else "[yellow]ADV[/yellow]"
+        tabla.add_row(str(f.linea), sev_style, f.regla, f.mensaje, f.codigo[:40])
+
+    console.print(tabla)
+
+
+@app.command("typology")
+def cmd_typology(
+    directorio: Path = typer.Argument(..., help="Directorio de la entrega del alumno o carpeta de entregas."),
+    json_output: bool = typer.Option(False, "--json", help="Salida en formato JSON."),
+) -> None:
+    """Clasifica automáticamente la tipología arquitectónica de una entrega (monolítica, modular, librería, incompleta)."""
+    import json
+    from dredd.core.submission_typology import clasificar_tipologia_entrega
+
+    reporte = clasificar_tipologia_entrega(directorio)
+    if json_output:
+        print(json.dumps(reporte.to_dict(), indent=2, ensure_ascii=False))
+        return
+
+    tipo_colores = {
+        "modular": "green",
+        "monolitica": "yellow",
+        "libreria_tda": "cyan",
+        "incompleta": "red",
+    }
+    color = tipo_colores.get(reporte.tipologia.value, "white")
+
+    console.print(Panel(
+        f"• **Tipología:** [bold {color}]{reporte.tipologia.value.upper()}[/bold {color}]\n"
+        f"• **Archivos C:** {reporte.cant_c} ({', '.join(reporte.archivos_c) if reporte.archivos_c else 'ninguno'})\n"
+        f"• **Cabeceras H:** {reporte.cant_h} ({', '.join(reporte.archivos_h) if reporte.archivos_h else 'ninguna'})\n"
+        f"• **Líneas de código (LOC):** {reporte.total_loc}\n"
+        f"• **Posee main():** {'Sí' if reporte.tiene_main else 'No'}\n"
+        f"• **Posee Makefile:** {'Sí' if reporte.tiene_makefile else 'No'}\n\n"
+        f"_{reporte.diagnostico}_",
+        title=f"[bold cyan]Tipología de Entrega: {reporte.estudiante_o_dir}[/bold cyan]",
+        border_style=color,
+    ))
+
+
+@app.command("eval-stability")
+def cmd_eval_stability(
+    binario: Path = typer.Argument(..., help="Ruta al binario ejecutable C."),
+    repeticiones: int = typer.Option(5, "--repeticiones", "-n", help="Número de ejecuciones consecutivas."),
+    input_data: str = typer.Option("", "--input", "-i", help="Datos de entrada stdin para el proceso."),
+    timeout: float = typer.Option(3.0, "--timeout", "-t", help="Timeout por corrida en segundos."),
+    json_output: bool = typer.Option(False, "--json", help="Salida en formato JSON."),
+) -> None:
+    """Evalúa la estabilidad temporal y determinismo de una solución mediante corridas reiteradas."""
+    import json
+    from dredd.core.stability_eval import evaluar_estabilidad_binario
+
+    res = evaluar_estabilidad_binario(binario, input_data=input_data, repeticiones=repeticiones, timeout_seg=timeout)
+    if json_output:
+        print(json.dumps(res.to_dict(), indent=2, ensure_ascii=False))
+        return
+
+    color = "green" if res.estable else "red"
+    console.print(Panel(
+        f"• **Estable:** [{color}]{'SÍ (100% Determinista)' if res.estable else 'NO (Comportamiento Flaky)'}[/{color}]\n"
+        f"• **Corridas totales:** {res.total_corridas}\n"
+        f"• **Salidas distintas:** {res.salidas_distintas}\n"
+        f"• **Códigos de retorno observados:** {res.codigos_retorno}\n"
+        f"• **Latencia promedio:** {sum(res.duraciones_ms)/len(res.duraciones_ms):.2f} ms\n\n"
+        f"_{res.detalle}_",
+        title=f"[bold cyan]Evaluación de Estabilidad: {res.ejecutable}[/bold cyan]",
+        border_style=color,
+    ))
+
+
+@app.command("cohort-bench")
+def cmd_cohort_bench(
+    entregas: Path = typer.Argument(..., help="Directorio contenedor de las entregas de la cohorte."),
+    binario: str = typer.Option("main", "--bin", "-b", help="Nombre del archivo binario ejecutable a comparar."),
+    input_data: str = typer.Option("", "--input", "-i", help="Datos de entrada para el benchmark."),
+    timeout: float = typer.Option(5.0, "--timeout", "-t", help="Timeout máximo por entrega en segundos."),
+    json_output: bool = typer.Option(False, "--json", help="Salida en formato JSON."),
+) -> None:
+    """Ejecuta benchmarking algorítmico comparativo de CPU y memoria en toda la cohorte."""
+    import json
+    from dredd.core.cohort_bench import comparar_desempeno_cohorte
+
+    rep = comparar_desempeno_cohorte(entregas, nombre_binario=binario, input_data=input_data, timeout_seg=timeout)
+    if json_output:
+        print(json.dumps(rep.to_dict(), indent=2, ensure_ascii=False))
+        return
+
+    tabla = Table(title=f"Benchmarking de Cohorte ({rep.total_evaluados} entregas)", border_style="cyan")
+    tabla.add_column("Puesto", justify="right", style="bold")
+    tabla.add_column("Estudiante", style="bold white")
+    tabla.add_column("Tiempo (ms)", justify="right", style="green")
+    tabla.add_column("Memoria RSS (KB)", justify="right", style="yellow")
+    tabla.add_column("Estado", justify="center")
+
+    for i, m in enumerate(rep.ranking, 1):
+        est_str = "[green]OK[/green]" if m.ok else f"[red]FAIL ({m.exit_code})[/red]"
+        tabla.add_row(str(i), m.estudiante, f"{m.tiempo_ms:.2f} ms", f"{m.memoria_rss_kb} KB", est_str)
+
+    console.print(tabla)
+    console.print(
+        f"[dim]Tiempos: Promedio = {rep.tiempo_promedio_ms:.2f} ms | Mediana = {rep.tiempo_mediana_ms:.2f} ms | "
+        f"Memoria promedio = {rep.memoria_promedio_kb:.1f} KB[/dim]"
+    )
+
+
+@app.command("smith-adversary")
+def cmd_smith_adversary(
+    target: Path = typer.Argument(..., help="Ruta a binario ejecutable o directorio de tests para inyección."),
+    inject: bool = typer.Option(False, "--inject", help="Inyectar casos adversarios .in en la carpeta destino."),
+    timeout: float = typer.Option(2.0, "--timeout", "-t", help="Timeout por caso adversario en segundos."),
+    json_output: bool = typer.Option(False, "--json", help="Salida en formato JSON."),
+) -> None:
+    """Genera e inyecta casos de prueba adversarios y de estrés (integración smith)."""
+    import json
+    from dredd.core.smith_adversary import inyectar_casos_adversarios, evaluar_con_casos_adversarios
+
+    if inject or target.is_dir():
+        rutas = inyectar_casos_adversarios(target if target.name == "tests" else target / "tests")
+        console.print(f"[bold green]✓ Inyectados {len(rutas)} casos adversarios en:[/bold green] [cyan]{target}[/cyan]")
+        return
+
+    if not target.is_file():
+        console.print(f"[bold red]El archivo binario '{target}' no existe.[/bold red]")
+        raise typer.Exit(code=1)
+
+    rep = evaluar_con_casos_adversarios(target, timeout_seg=timeout)
+    if json_output:
+        print(json.dumps(rep.to_dict(), indent=2, ensure_ascii=False))
+        return
+
+    color = "green" if rep.crashes == 0 else "red"
+    console.print(Panel(
+        f"• **Estudiante:** {rep.estudiante}\n"
+        f"• **Casos superados:** [green]{rep.casos_superados} / {rep.total_casos}[/green]\n"
+        f"• **Crashes (SIGSEGV/ABRT/Timeout):** [{color}]{rep.crashes}[/{color}]",
+        title="[bold cyan]Resultados de Pruebas Adversarias (Smith)[/bold cyan]",
+        border_style=color,
+    ))
+
+    tabla = Table(title="Detalle de Casos Adversarios", border_style="dim")
+    tabla.add_column("Caso", style="bold")
+    tabla.add_column("Estado", justify="center")
+    tabla.add_column("Código", justify="right")
+    tabla.add_column("Detalle")
+
+    for d in rep.detalles:
+        est_style = "[green]OK[/green]" if d["estado"] == "OK" else f"[bold red]{d['estado']}[/bold red]"
+        tabla.add_row(d["caso"], est_style, d["codigo"], d["mensaje"])
+
+    console.print(tabla)
+
+
+@app.command("eval-shielded")
+def cmd_eval_shielded(
+    cmd: str = typer.Argument(..., help="Comando binario a ejecutar en sandbox blindado."),
+    input_data: str = typer.Option("", "--input", "-i", help="Entrada stdin."),
+    timeout: float = typer.Option(3.0, "--timeout", "-t", help="Timeout máximo en segundos."),
+    memoria_mb: int = typer.Option(48, "--memory", "-m", help="Límite estricto de memoria en MB."),
+) -> None:
+    """Ejecuta un proceso bajo el modo 'Sandbox Blindado' con corte total de red y namespaces aislados."""
+    import shlex
+    from dredd.core.sandbox import execute_shielded_sandbox
+
+    args = shlex.split(cmd)
+    retcode, out, err, timed_out = execute_shielded_sandbox(
+        args,
+        input_data=input_data,
+        timeout=timeout,
+        max_memory_mb=memoria_mb,
+    )
+    console.print(f"[bold cyan]Código de salida:[/bold cyan] {retcode}")
+    if timed_out:
+        console.print("[bold red]Ejecución interrumpida por límite de recursos o timeout.[/bold red]")
+    if out:
+        console.print(f"[bold green]STDOUT:[/bold green]\n{out}")
+    if err:
+        console.print(f"[bold yellow]STDERR:[/bold yellow]\n{err}")
+
 
 
 

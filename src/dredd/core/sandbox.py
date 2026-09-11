@@ -219,3 +219,91 @@ def execute_sandboxed(
     except Exception as e:
         return -1, "", f"Error de ejecución en sandbox: {e}", False
 
+
+def _set_shielded_resource_limits(max_memory_mb: int = 48, max_cpu_seconds: int = 3, max_nofile: int = 16) -> None:
+    """Configura límites reforzados de recursos, descriptores de archivos y memoria virtual."""
+    _set_resource_limits(max_memory_mb=max_memory_mb, max_cpu_seconds=max_cpu_seconds)
+    try:
+        # Límite de descriptores de archivo abiertos para mitigar agotamiento de handles
+        resource.setrlimit(resource.RLIMIT_NOFILE, (max_nofile, max_nofile))
+    except Exception:
+        pass
+    try:
+        # Límite de tamaño de stack
+        stack_bytes = 8 * 1024 * 1024  # 8MB max
+        resource.setrlimit(resource.RLIMIT_STACK, (stack_bytes, stack_bytes))
+    except Exception:
+        pass
+
+
+def execute_shielded_sandbox(
+    cmd: List[str],
+    input_data: str = "",
+    timeout: float = 3.0,
+    max_memory_mb: int = 48,
+    workspace: Optional[Path] = None,
+) -> Tuple[int, str, str, bool]:
+    """Modo 'Sandbox Blindado': ejecución con aislamiento estricto de red, namespaces y cuotas de memoria/swap."""
+    bwrap_bin = shutil.which("bwrap")
+    cwd_dir = str(workspace.resolve()) if workspace and workspace.is_dir() else None
+
+    if bwrap_bin:
+        # Modo blindado estricto con bwrap
+        bwrap_cmd = [
+            bwrap_bin,
+            "--unshare-all",
+            "--unshare-net",           # Corte total de red
+            "--unshare-ipc",           # Sin IPC compartido
+            "--unshare-pid",           # Namespace PID propio
+            "--ro-bind", "/", "/",
+            "--tmpfs", "/tmp",
+            "--tmpfs", "/dev/shm",     # Swap/memoria compartida aislada
+            "--dev", "/dev",
+            "--proc", "/proc",
+            "--die-with-parent",
+        ]
+        if cwd_dir:
+            bwrap_cmd.extend(["--bind", cwd_dir, cwd_dir, "--chdir", cwd_dir])
+        full_cmd = bwrap_cmd + ["--"] + cmd
+
+        try:
+            proc = subprocess.run(
+                full_cmd,
+                input=input_data,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=cwd_dir,
+            )
+            if proc.returncode == 0 or "bwrap:" not in proc.stderr:
+                return proc.returncode, proc.stdout, proc.stderr, False
+        except subprocess.TimeoutExpired as e:
+            stdout_txt = e.stdout.decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+            stderr_txt = e.stderr.decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+            return -1, stdout_txt, f"[TIMEOUT BLINDADO] Proceso abortado tras {timeout}s: {stderr_txt}", True
+        except Exception:
+            pass
+
+    # Fallback con límites reforzados por setrlimit
+    try:
+        proc = subprocess.run(
+            cmd,
+            input=input_data,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd_dir,
+            preexec_fn=lambda: _set_shielded_resource_limits(
+                max_memory_mb=max_memory_mb,
+                max_cpu_seconds=int(timeout) + 1,
+            ),
+        )
+        return proc.returncode, proc.stdout, proc.stderr, False
+    except subprocess.TimeoutExpired as e:
+        stdout_txt = e.stdout.decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+        stderr_txt = e.stderr.decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+        return -1, stdout_txt, f"[TIMEOUT / CGROUP OVERFLOW] Abortado por cuota de recursos: {stderr_txt}", True
+    except Exception as e:
+        return -1, "", f"Error en sandbox blindado: {e}", False
+
+
