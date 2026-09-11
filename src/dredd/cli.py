@@ -1284,6 +1284,26 @@ def cmd_audit_git(
     auditar_historial_git(repo, console=console)
 
 
+@app.command("git-forensics")
+def cmd_git_forensics(
+    repo: Path = typer.Argument(Path("."), help="Ruta al repositorio de la entrega a auditar."),
+    max_skew: int = typer.Option(300, "--max-skew", help="Tolerancia en segundos para desfase entre autor y committer."),
+    json_output: bool = typer.Option(False, "--json", help="Exporta el resultado en formato JSON estándar."),
+    fail_on_anomaly: bool = typer.Option(False, "--fail-on-anomaly", help="Finaliza con código de error si el riesgo forense es ALTO."),
+) -> None:
+    """Audita marcas de tiempo en Git para detectar alteraciones manuales o rebase masivo previo a entrega."""
+    import json
+    from dredd.core.git_anomaly import auditar_git_forensics
+    c = Console(quiet=json_output)
+    res = auditar_git_forensics(repo, max_skew_seconds=max_skew, console=c)
+    if json_output:
+        print(json.dumps(res, indent=2))
+    if not res.get("es_repo_git"):
+        raise typer.Exit(code=1)
+    if fail_on_anomaly and res.get("riesgo") == "ALTO":
+        raise typer.Exit(code=1)
+
+
 @app.command("export-feedback")
 @app.command("notify-batch")
 def cmd_export_feedback(
