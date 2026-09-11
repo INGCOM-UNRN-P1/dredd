@@ -599,21 +599,8 @@ def run_ripley_analysis(
 
     def _collect_ast_findings() -> List[Dict[str, Any]]:
         findings = []
+        # Dredd no invoca a Ripley externo para no duplicar el informe de Gaff
         if checks.ripley_enabled:
-            try:
-                from ripley.core.engine import analyze_target
-
-                res = analyze_target(target_path)
-                raw_findings = res.to_dict().get("ast_findings", [])
-                if uncompleted_set:
-                    raw_findings = [
-                        rf for rf in raw_findings
-                        if not any(u in (rf.get("file") or "") for u in uncompleted_set)
-                    ]
-                findings.extend(raw_findings)
-            except Exception:
-                pass
-        if not findings:
             from dredd.core.ast_checker import audit_c_file
             for cf in sorted(target_path.glob("**/*.c")):
                 if not any(part.startswith(".") for part in cf.parts):
@@ -794,120 +781,87 @@ def run_ripley_analysis(
 
     else:
         # Modo 'archivos_individuales'
-        # 1. Intentar importación directa de Ripley si está disponible en el entorno
+        # Dredd no invoca al motor Ripley externo para no duplicar el informe de Gaff.
+        ast_findings = []
         if checks.ripley_enabled:
-            try:
-                from ripley.core.engine import analyze_target
-
-                result = analyze_target(target_path)
-                res_dict = result.to_dict()
-            except Exception:
-                pass
-
-        # 2. Intentar ejecución vía comando CLI de ripley si no se obtuvo por import
-        if res_dict is None and checks.ripley_enabled:
-            ripley_bin = shutil.which("ripley") or shutil.which("ripley-check")
-            if ripley_bin:
-                try:
-                    proc = subprocess.run(
-                        [
-                            ripley_bin,
-                            "analyze",
-                            str(target_path),
-                            "--format",
-                            "json",
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                    )
-                    if proc.stdout.strip():
-                        res_dict = json.loads(proc.stdout)
-                except Exception:
-                    pass
-
-        # 3. Fallback nativo: compilación por archivo C individual + análisis AST nativo
-        if res_dict is None:
             from dredd.core.ast_checker import audit_c_file
-
-            ast_findings = []
             for c_file in c_files:
                 ast_findings.extend(audit_c_file(c_file))
 
-            if not c_files:
-                res_dict = {
-                    "version": "2.0.0",
-                    "compilation": {
-                        "success": False,
-                        "raw_stderr": "No se encontraron archivos .c",
-                        "compiler_used": "none",
-                    },
-                    "ast_findings": [],
-                    "tests": {
-                        "total": 0,
-                        "passed": 0,
-                        "failed": 0,
-                        "cases": [],
-                    },
-                    "metrics": {},
-                }
-            else:
-                file_compilations = {}
-                all_diags = []
-                all_stderrs = []
-                all_full_outputs = []
-                files_comp_ok = True
+        if not c_files:
+            res_dict = {
+                "version": "2.0.0",
+                "compilation": {
+                    "success": False,
+                    "raw_stderr": "No se encontraron archivos .c",
+                    "compiler_used": "none",
+                },
+                "ast_findings": [],
+                "tests": {
+                    "total": 0,
+                    "passed": 0,
+                    "failed": 0,
+                    "cases": [],
+                },
+                "metrics": {},
+            }
+        else:
+            file_compilations = {}
+            all_diags = []
+            all_stderrs = []
+            all_full_outputs = []
+            files_comp_ok = True
 
-                import tempfile
+            import tempfile
 
-                with tempfile.TemporaryDirectory() as tmp_d:
-                    tmp_dir = Path(tmp_d)
-                    for idx, c_f in enumerate(c_files):
-                        tmp_bin = tmp_dir / f"bin_eval_{idx}"
-                        comp_f = compile_c_sources([c_f], output_bin=tmp_bin)
-                        f_full = getattr(comp_f, "full_output", comp_f.raw_stderr) or comp_f.raw_stderr
-                        file_compilations[c_f.name] = {
-                            "success": comp_f.success,
-                            "raw_stderr": comp_f.raw_stderr,
-                            "raw_stdout": getattr(comp_f, "raw_stdout", ""),
-                            "full_output": f_full,
-                            "translated_diagnostics": (
-                                comp_f.translated_diagnostics
-                            ),
-                            "compiler_used": comp_f.compiler_used,
-                            "command": getattr(comp_f, "command", []),
-                            "returncode": getattr(comp_f, "returncode", 0 if comp_f.success else 1),
-                        }
-                        if not comp_f.success:
-                            files_comp_ok = False
-                            all_stderrs.append(
-                                f"[{c_f.name}]:\n{comp_f.raw_stderr}"
-                            )
-                        if f_full.strip():
-                            all_full_outputs.append(f"=== {c_f.name} ===\n{f_full.strip()}")
-                        else:
-                            all_full_outputs.append(f"=== {c_f.name} ===\nCompilación exitosa (sin advertencias ni errores).")
-                        all_diags.extend(comp_f.translated_diagnostics)
+            with tempfile.TemporaryDirectory() as tmp_d:
+                tmp_dir = Path(tmp_d)
+                for idx, c_f in enumerate(c_files):
+                    tmp_bin = tmp_dir / f"bin_eval_{idx}"
+                    comp_f = compile_c_sources([c_f], output_bin=tmp_bin)
+                    f_full = getattr(comp_f, "full_output", comp_f.raw_stderr) or comp_f.raw_stderr
+                    file_compilations[c_f.name] = {
+                        "success": comp_f.success,
+                        "raw_stderr": comp_f.raw_stderr,
+                        "raw_stdout": getattr(comp_f, "raw_stdout", ""),
+                        "full_output": f_full,
+                        "translated_diagnostics": (
+                            comp_f.translated_diagnostics
+                        ),
+                        "compiler_used": comp_f.compiler_used,
+                        "command": getattr(comp_f, "command", []),
+                        "returncode": getattr(comp_f, "returncode", 0 if comp_f.success else 1),
+                    }
+                    if not comp_f.success:
+                        files_comp_ok = False
+                        all_stderrs.append(
+                            f"[{c_f.name}]:\n{comp_f.raw_stderr}"
+                        )
+                    if f_full.strip():
+                        all_full_outputs.append(f"=== {c_f.name} ===\n{f_full.strip()}")
+                    else:
+                        all_full_outputs.append(f"=== {c_f.name} ===\nCompilación exitosa (sin advertencias ni errores).")
+                    all_diags.extend(comp_f.translated_diagnostics)
 
-                res_dict = {
-                    "version": "2.0.0",
-                    "compilation": {
-                        "success": files_comp_ok,
-                        "raw_stderr": "\n\n".join(all_stderrs),
-                        "full_output": "\n\n".join(all_full_outputs),
-                        "translated_diagnostics": all_diags,
-                        "compiler_used": checks.daedalus_compiler,
-                        "files": file_compilations,
-                    },
-                    "ast_findings": ast_findings,
-                    "tests": {
-                        "total": 0,
-                        "passed": 0,
-                        "failed": 0,
-                        "cases": [],
-                    },
-                    "metrics": {"c_files_count": len(c_files)},
-                }
+            res_dict = {
+                "version": "2.0.0",
+                "compilation": {
+                    "success": files_comp_ok,
+                    "raw_stderr": "\n\n".join(all_stderrs),
+                    "full_output": "\n\n".join(all_full_outputs),
+                    "translated_diagnostics": all_diags,
+                    "compiler_used": checks.daedalus_compiler,
+                    "files": file_compilations,
+                },
+                "ast_findings": ast_findings,
+                "tests": {
+                    "total": 0,
+                    "passed": 0,
+                    "failed": 0,
+                    "cases": [],
+                },
+                "metrics": {"c_files_count": len(c_files)},
+            }
 
     # 4. Auditoría de seguridad y evasión de sandbox (Kaneda)
     if checks.kaneda_enabled:

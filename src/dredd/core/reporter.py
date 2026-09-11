@@ -371,7 +371,18 @@ def write_individual_tool_reports(
         generated["daedalus"] = daed_path
 
     # 2. Ripley (Reglas P1 / AST)
-    ast_p1_findings = [f for f in ast_findings if not (f.get("rule_code") or "").startswith("SEC_") and not f.get("rule_name", "").startswith("[SEGURIDAD]")]
+    gaff_rules = {f"{sf.get('rule_code')}:{sf.get('file')}:{sf.get('line')}" for sf in style_findings}
+    gaff_codes = {str(sf.get('rule_code', '')).lower() for sf in style_findings}
+    ast_p1_findings = [
+        f for f in ast_findings
+        if not (f.get("rule_code") or "").startswith("SEC_")
+        and not f.get("rule_name", "").startswith("[SEGURIDAD]")
+        and not (style_findings and (
+            f"{f.get('rule_code') or f.get('rule_id')}:{f.get('file')}:{f.get('line')}" in gaff_rules
+            or str(f.get("rule_code") or f.get("rule_id", "")).lower() in gaff_codes
+            or str(f.get("rule_code") or f.get("rule_id", "")).lower() in ("0x0001h", "gaff011", "gaff009", "gaff010", "gaff001", "gaff003", "gaff007")
+        ))
+    ]
     rip_lines = ["## Observaciones de Calidad y Reglas P1 — Ripley"]
     if ast_p1_findings:
         rip_lines.append(f"\nSe detectaron **{len(ast_p1_findings)}** observación(es) en el código C:\n")
@@ -978,7 +989,20 @@ def generate_personalized_feedback_markdown(
     else:
         lines.append(f"- **Compilación ({comp.get('compiler_used', 'GCC').upper()}):** {'✓ Exitosa' if comp.get('success') else '✖ Falló'}")
     spk = analysis.get("spunkmeyer_findings", [])
-    lines.append(f"- **Reglas P1 / Calidad:** {len(ast)} observación(es) detectada(s)")
+    gaff_keys = {f"{sf.get('rule_code')}:{sf.get('file')}:{sf.get('line')}" for sf in style}
+    gaff_codes = {str(sf.get('rule_code', '')).lower() for sf in style}
+    ast_unique = [
+        f for f in ast
+        if not (f.get("rule_code") or "").startswith("SEC_")
+        and not f.get("rule_name", "").startswith("[SEGURIDAD]")
+        and not (style and (
+            f"{f.get('rule_code') or f.get('rule_id')}:{f.get('file')}:{f.get('line')}" in gaff_keys
+            or str(f.get("rule_code") or f.get("rule_id", "")).lower() in gaff_codes
+            or str(f.get("rule_code") or f.get("rule_id", "")).lower() in ("0x0001h", "gaff011", "gaff009", "gaff010", "gaff001", "gaff003", "gaff007")
+        ))
+    ]
+    if ast_unique:
+        lines.append(f"- **Reglas P1 / Calidad:** {len(ast_unique)} observación(es) detectada(s)")
     if spk:
         lines.append(f"- **Antipatrones didácticos (Spunkmeyer):** ⚠️ {len(spk)} observación(es) detectada(s)")
     else:
@@ -1000,7 +1024,7 @@ def generate_personalized_feedback_markdown(
     for d in comp.get("translated_diagnostics", []):
         if d.get("suggestion"):
             issues.append(d["suggestion"])
-    for f in ast:
+    for f in ast_unique:
         if f.get("suggestion"):
             issues.append(f"{f.get('rule_code', 'P1')}: {f['suggestion']}")
     for sf in style:

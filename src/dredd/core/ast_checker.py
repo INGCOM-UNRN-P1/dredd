@@ -304,5 +304,9 @@ def audit_c_file(c_file: Path) -> List[Dict[str, Any]]:
 
     for f in findings:
         f["file"] = c_file.name
+        if "rule_code" not in f and "rule_id" in f:
+            f["rule_code"] = f["rule_id"]
+        elif "rule_id" not in f and "rule_code" in f:
+            f["rule_id"] = f["rule_code"]
 
     return findings

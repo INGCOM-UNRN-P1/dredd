@@ -19,8 +19,8 @@ import yaml
 class ToolChecksConfig:
     """Configuración de verificaciones de herramientas pedagógicas y estáticas."""
 
-    # Ripley (P1 rules / AST)
-    ripley_enabled: bool = True
+    # Ripley (P1 rules / AST) - deshabilitado por defecto para no duplicar a Gaff
+    ripley_enabled: bool = False
     ripley_strict: bool = False
     ripley_rules: List[str] = field(default_factory=list)  # Vacío = todas las reglas
     ripley_disabled_rules: List[str] = field(default_factory=list)  # ej. ["0x0009h"]
@@ -138,7 +138,7 @@ class ToolChecksConfig:
         plag_data = data.get("plagiarism", {})
 
         return cls(
-            ripley_enabled=ripley_data.get("enabled", data.get("ripley_enabled", True)),
+            ripley_enabled=ripley_data.get("enabled", data.get("ripley_enabled", False)),
             ripley_strict=ripley_data.get("strict", data.get("ripley_strict", False)),
             ripley_rules=ripley_data.get("rules", data.get("ripley_rules", [])),
             ripley_disabled_rules=ripley_data.get("disabled_rules", data.get("ripley_disabled_rules", [])),
