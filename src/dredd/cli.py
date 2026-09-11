@@ -598,20 +598,44 @@ def cmd_plagiarism(
 
 @github_app.command("pr-fix")
 def cmd_pr_fix(
-    exercise: str = typer.Argument(..., help="Nombre de la actividad."),
-    student: str = typer.Argument(..., help="Nombre de usuario del estudiante."),
-    org: str = typer.Option("INGCOM-UNRN-P1", "--org", "-o", help="Organización de GitHub."),
+    practica: str = typer.Argument(..., help="Nombre de la actividad o práctica."),
+    nombre_clonado: str = typer.Argument(..., help="Nombre con el que fue clonado el directorio del estudiante."),
+    direccion: str = typer.Argument(..., help="Dirección o URL del repositorio en GitHub."),
     branch: str = typer.Option("correccion", "--branch", "-b", help="Nombre de la rama de corrección."),
+    base: str = typer.Option("main", "--base", help="Rama base de destino para el Pull Request."),
 ) -> None:
-    """Reconstruye o crea el Pull Request de corrección para un estudiante (reemplaza prfix.sh)."""
-    from dredd.core.github_api import create_or_repair_pr
+    """Reconstruye o crea el Pull Request de corrección para un estudiante a partir de la práctica, nombre clonado y dirección remota."""
+    from dredd.core.github_api import create_or_repair_pr, extract_repo_slug
+    from dredd.core.git_ops import clone_submission_repo
 
     workspace_dir = Path.cwd()
-    exercise_slug, submissions_dir = resolve_submissions_dir(workspace_dir, exercise)
+    exercise_slug, submissions_dir = resolve_submissions_dir(workspace_dir, practica)
+    target_dir = submissions_dir / nombre_clonado
+
+    # Localizar el repositorio Git dentro de la carpeta del estudiante
+    if (target_dir / "repo" / ".git").is_dir():
+        repo_path = target_dir / "repo"
+    elif (target_dir / ".git").is_dir():
+        repo_path = target_dir
+    else:
+        console.print(f"Clonando entrega para [cyan]{nombre_clonado}[/cyan] desde '{direccion}'...")
+        repo_path, _, _ = clone_submission_repo(
+            submissions_dir=submissions_dir,
+            student_dir_name=nombre_clonado,
+            repo_url=direccion,
+        )
+
     try:
-        repo_path = ensure_submission_repo(org, exercise_slug, student, workspace_dir, submissions_dir=submissions_dir)
-        console.print(f"Reconstruyendo PR de corrección para [cyan]{student}[/cyan]...")
-        ok = create_or_repair_pr(org, student, repo_path, branch_name=branch)
+        repo_target = extract_repo_slug(direccion)
+        console.print(f"Reconstruyendo PR de corrección para [cyan]{nombre_clonado}[/cyan] ({repo_target})...")
+        ok = create_or_repair_pr(
+            student=nombre_clonado,
+            repo_path=repo_path,
+            branch_name=branch,
+            base_branch=base,
+            repo_target=repo_target,
+            direccion=direccion,
+        )
         if ok:
             console.print("[bold green]✓ Pull Request preparado o verificado con éxito en GitHub.[/bold green]")
         else:

@@ -273,4 +273,112 @@ def test_eval_with_root_git_repo(tmp_path: Path, monkeypatch):
     assert not (student_dir / "r1").exists()
 
 
+def test_extract_repo_slug():
+    from dredd.core.github_api import extract_repo_slug
+
+    assert extract_repo_slug("https://github.com/MI-ORG/tp1-estudiante.git") == "MI-ORG/tp1-estudiante"
+    assert extract_repo_slug("https://github.com/MI-ORG/tp1-estudiante") == "MI-ORG/tp1-estudiante"
+    assert extract_repo_slug("git@github.com:MI-ORG/tp1-estudiante.git") == "MI-ORG/tp1-estudiante"
+    assert extract_repo_slug("MI-ORG/tp1-estudiante") == "MI-ORG/tp1-estudiante"
+    assert extract_repo_slug("tp1-estudiante", default_org="DEFAULT-ORG") == "DEFAULT-ORG/tp1-estudiante"
+
+
+def test_cli_github_pr_fix_invocation(tmp_path: Path, monkeypatch):
+    from typer.testing import CliRunner
+    from dredd.cli import app
+    import dredd.core.github_api as gh_api
+    import subprocess
+
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    # 1. Crear repositorio remoto ficticio
+    remote_origin = tmp_path / "remote_tp0.git"
+    _create_git_repo(remote_origin, filename="main.c", content="int main() { return 0; }\n")
+
+    # 2. Estructura de práctica local
+    tp_dir = tmp_path / "TP0"
+    tp_dir.mkdir()
+    student_dir = tp_dir / "TP0-Enehuen"
+    student_dir.mkdir()
+    repo_dir = student_dir / "repo"
+
+    # Clonar repo localmente
+    subprocess.run(["git", "clone", str(remote_origin), str(repo_dir)], check=True, capture_output=True)
+
+    # Mockear disponibilidad de gh y la llamada subprocess de gh pr create
+    monkeypatch.setattr(gh_api, "is_gh_installed", lambda: True)
+
+    gh_cmds = []
+    original_run = subprocess.run
+
+    def mock_run(cmd, *args, **kwargs):
+        if isinstance(cmd, list) and len(cmd) > 0 and cmd[0] == "gh":
+            gh_cmds.append(cmd)
+            class MockProc:
+                returncode = 0
+                stdout = "https://github.com/INGCOM-UNRN-P1/TP0-Enehuen/pull/1\n"
+                stderr = ""
+            return MockProc()
+        return original_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    # Invocar pr-fix con practica, nombre_clonado y direccion
+    direccion = "https://github.com/INGCOM-UNRN-P1/TP0-Enehuen.git"
+    res = runner.invoke(app, ["github", "pr-fix", "TP0", "TP0-Enehuen", direccion])
+    assert res.exit_code == 0
+    assert "TP0-Enehuen" in res.output
+    assert "Pull Request preparado o verificado con éxito" in res.output
+
+    # Verificar que se llamó a gh con el repo extraído de la dirección
+    assert len(gh_cmds) == 1
+    call_args = gh_cmds[0]
+    assert "--repo" in call_args
+    idx = call_args.index("--repo")
+    assert call_args[idx + 1] == "INGCOM-UNRN-P1/TP0-Enehuen"
+
+
+def test_cli_github_pr_fix_auto_clone_if_not_present(tmp_path: Path, monkeypatch):
+    from typer.testing import CliRunner
+    from dredd.cli import app
+    import dredd.core.github_api as gh_api
+    import subprocess
+
+    runner = CliRunner()
+    monkeypatch.chdir(tmp_path)
+
+    remote_origin = tmp_path / "remote_tp0_auto.git"
+    _create_git_repo(remote_origin, filename="main.c", content="int main() { return 0; }\n")
+
+    monkeypatch.setattr(gh_api, "is_gh_installed", lambda: True)
+
+    gh_cmds = []
+    original_run = subprocess.run
+
+    def mock_run(cmd, *args, **kwargs):
+        if isinstance(cmd, list) and len(cmd) > 0 and cmd[0] == "gh":
+            gh_cmds.append(cmd)
+            class MockProc:
+                returncode = 0
+                stdout = "https://github.com/INGCOM-UNRN-P1/TP0-Auto/pull/1\n"
+                stderr = ""
+            return MockProc()
+        return original_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    # La carpeta no existe aún
+    res = runner.invoke(app, ["github", "pr-fix", "TP0", "TP0-Auto", str(remote_origin)])
+    assert res.exit_code == 0
+    assert "Clonando entrega para" in res.output
+
+    cloned_repo = tmp_path / "TP0-submissions" / "TP0-Auto" / "repo"
+    if not cloned_repo.exists():
+        cloned_repo = tmp_path / "TP0" / "TP0-Auto" / "repo"
+    assert (cloned_repo / ".git").is_dir()
+    assert len(gh_cmds) == 1
+
+
+
 

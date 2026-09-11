@@ -83,25 +83,63 @@ def open_pr_in_browser(org: str, student: str, pr_number: Optional[int] = None) 
         subprocess.Popen([opener, pr_files_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def extract_repo_slug(direccion: str, default_org: str = "INGCOM-UNRN-P1") -> str:
+    """Extrae el identificador owner/repo a partir de una URL HTTPS, SSH o slug."""
+    clean = direccion.strip()
+    if clean.endswith(".git"):
+        clean = clean[:-4]
+    if "github.com/" in clean:
+        parts = clean.split("github.com/")[-1].strip("/").split("/")
+        if len(parts) >= 2:
+            return f"{parts[-2]}/{parts[-1]}"
+    elif "github.com:" in clean:
+        parts = clean.split("github.com:")[-1].strip("/").split("/")
+        if len(parts) >= 2:
+            return f"{parts[-2]}/{parts[-1]}"
+    parts = clean.strip("/").split("/")
+    if len(parts) >= 2:
+        return f"{parts[-2]}/{parts[-1]}"
+    if default_org and len(parts) == 1 and parts[0]:
+        return f"{default_org}/{parts[0]}"
+    return clean
+
+
 def create_or_repair_pr(
-    org: str,
-    student: str,
-    repo_path: Path,
+    org: str = "",
+    student: str = "",
+    repo_path: Optional[Path] = None,
     branch_name: str = "correccion",
     base_branch: str = "main",
     title: str = "Corrección",
     body: str = "Pull Request de corrección automática generado por Dredd.",
+    repo_target: Optional[str] = None,
+    direccion: Optional[str] = None,
 ) -> bool:
-    """Crea o repara una rama y Pull Request de corrección para un estudiante (reemplaza prfix.sh)."""
+    """Crea o re-establece una rama y Pull Request de corrección para un repositorio."""
     if not is_gh_installed():
         raise RuntimeError("GitHub CLI ('gh') no está instalado o autenticado.")
 
-    # 1. Asegurar rama local
+    if repo_path is None:
+        raise ValueError("Ruta de repositorio local no especificada.")
+
+    # 1. Configurar remote origin si se suministró una dirección explícita
+    if direccion:
+        remotes_out = subprocess.run(
+            ["git", "-C", str(repo_path), "remote"],
+            capture_output=True,
+            text=True,
+        ).stdout.split()
+        if "origin" not in remotes_out:
+            subprocess.run(["git", "-C", str(repo_path), "remote", "add", "origin", direccion], capture_output=True)
+        else:
+            subprocess.run(["git", "-C", str(repo_path), "remote", "set-url", "origin", direccion], capture_output=True)
+
+    # 2. Configurar rama local
     subprocess.run(["git", "-C", str(repo_path), "checkout", "-B", branch_name], capture_output=True)
     subprocess.run(["git", "-C", str(repo_path), "push", "-f", "--set-upstream", "origin", branch_name], capture_output=True)
 
-    # 2. Crear PR mediante gh
-    repo_full_name = f"{org}/{student}"
+    # 3. Crear PR mediante gh
+    repo_full_name = repo_target or (extract_repo_slug(direccion) if direccion else (f"{org}/{student}" if org else student))
     proc = subprocess.run(
         [
             "gh",
@@ -122,5 +160,33 @@ def create_or_repair_pr(
         text=True,
         timeout=20,
     )
-    return proc.returncode == 0 or "already exists" in (proc.stderr or "").lower()
+    if proc.returncode == 0 or "already exists" in (proc.stderr or "").lower():
+        return True
+
+    # Intento secundario con base 'master' si 'main' no existe
+    if base_branch == "main":
+        proc_master = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "create",
+                "--repo",
+                repo_full_name,
+                "--base",
+                "master",
+                "--head",
+                branch_name,
+                "--title",
+                title,
+                "--body",
+                body,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        return proc_master.returncode == 0 or "already exists" in (proc_master.stderr or "").lower()
+
+    return False
+
 
