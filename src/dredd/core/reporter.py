@@ -403,12 +403,40 @@ def write_individual_tool_reports(
     generated["kaneda"] = kan_path
 
     # 4. Spunkmeyer (Antipatrones Didácticos)
-    spk_findings = [f for f in ast_p1_findings if "antipattern" in str(f.get("rule_id", "")).lower() or "feof" in str(f.get("message", "")).lower()]
+    spk_findings = analysis.get("spunkmeyer_findings")
+    if spk_findings is None:
+        spk_findings = [f for f in ast_p1_findings if "antipattern" in str(f.get("rule_id", "")).lower() or "feof" in str(f.get("message", "")).lower()]
     spk_lines = ["## Antipatrones Didácticos — Spunkmeyer"]
     if spk_findings:
-        spk_lines.append(f"\nSe detectaron **{len(spk_findings)}** antipatrones didácticos:\n")
+        spk_lines.append(f"\nSe detectaron **{len(spk_findings)}** observación(es) de antipatrones didácticos:\n")
+        spk_lines.append("| Regla | Ubicación | Antipatrón | Diagnóstico | Sugerencia |")
+        spk_lines.append("| :--- | :--- | :--- | :--- | :--- |")
         for sf in spk_findings:
-            spk_lines.append(f"- **`{sf.get('rule_id')}`** en `{sf.get('file')}:{sf.get('line')}`: {sf.get('message')}")
+            rc = sf.get("rule_code") or sf.get("rule_id", "SPK")
+            loc = f"`{sf.get('file')}:{sf.get('line')}`"
+            name = sf.get("name") or sf.get("alias") or "Antipatrón"
+            msg = sf.get("message", "")
+            sug = sf.get("suggestion", "")
+            spk_lines.append(f"| `{rc}` | {loc} | **{name}** | {msg} | {sug} |")
+
+        has_details = any(sf.get("explanation") or sf.get("example_bad") or sf.get("code_line") for sf in spk_findings)
+        if has_details:
+            spk_lines.append("\n### 🔍 Detalle Pedagógico de Antipatrones\n")
+            for sf in spk_findings:
+                rc = sf.get("rule_code") or sf.get("rule_id", "SPK")
+                name = sf.get("name") or sf.get("alias") or "Antipatrón"
+                spk_lines.append(f"#### Regla `{rc}`: {name}")
+                spk_lines.append(f"- **Ubicación:** `{sf.get('file')}:{sf.get('line')}`")
+                if sf.get("code_line"):
+                    spk_lines.append(f"```c\n{sf.get('code_line')}\n```")
+                if sf.get("explanation"):
+                    spk_lines.append(f"- **Explicación:** {sf.get('explanation')}")
+                if sf.get("suggestion"):
+                    spk_lines.append(f"- **Sugerencia:** {sf.get('suggestion')}")
+                if sf.get("example_bad") and sf.get("example_good"):
+                    spk_lines.append(f"- **Ejemplo incorrecto:**\n```c\n{sf.get('example_bad')}\n```")
+                    spk_lines.append(f"- **Ejemplo recomendado:**\n```c\n{sf.get('example_good')}\n```")
+                spk_lines.append("")
     else:
         spk_lines.append("\n✓ **Estado:** No se detectaron antipatrones pedagógicos conocidos.")
     spk_path = rni_dir / "spunkmeyer.md"
@@ -949,7 +977,12 @@ def generate_personalized_feedback_markdown(
             lines.append(f"- **Pruebas de proyecto (make test):** {'✓ Aprobadas' if t_ok else '✖ Fallaron'}")
     else:
         lines.append(f"- **Compilación ({comp.get('compiler_used', 'GCC').upper()}):** {'✓ Exitosa' if comp.get('success') else '✖ Falló'}")
+    spk = analysis.get("spunkmeyer_findings", [])
     lines.append(f"- **Reglas P1 / Calidad:** {len(ast)} observación(es) detectada(s)")
+    if spk:
+        lines.append(f"- **Antipatrones didácticos (Spunkmeyer):** ⚠️ {len(spk)} observación(es) detectada(s)")
+    else:
+        lines.append("- **Antipatrones didácticos (Spunkmeyer):** ✓ Conforme (sin antipatrones detectados)")
     lines.append(f"- **Estilo y Formato (Gaff):** {'✓ Conforme' if not style else f'⚠️ {len(style)} observación(es)'}")
     if val.get("executed"):
         val_lost = val.get("definitely_lost_bytes", 0)
@@ -973,6 +1006,9 @@ def generate_personalized_feedback_markdown(
     for sf in style:
         if sf.get("suggestion"):
             issues.append(f"{sf.get('rule_code', 'GAFF')}: {sf['suggestion']}")
+    for sf in spk:
+        if sf.get("suggestion"):
+            issues.append(f"{sf.get('rule_code', 'SPK')}: {sf['suggestion']}")
     if val.get("executed") and not val.get("clean"):
         issues.append("Liberar toda la memoria dinámica reservada con malloc/calloc usando free() antes de terminar.")
     for tc in tests.get("cases", []):

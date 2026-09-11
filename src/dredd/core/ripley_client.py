@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from dredd.core.config import ToolChecksConfig
@@ -128,6 +128,148 @@ def audit_style_with_gaff(
         "total_style_violations": len(findings),
     }
     return findings, metrics
+
+
+def audit_antipatterns_with_spunkmeyer(
+    target_path: Path,
+    checks: Optional[ToolChecksConfig] = None,
+    uncompleted_exercises: Optional[Set[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Ejecuta el detector de antipatrones Spunkmeyer sobre los archivos C del estudiante."""
+    import re
+    findings: List[Dict[str, Any]] = []
+
+    if target_path.is_file():
+        c_files = [target_path] if target_path.suffix.lower() in (".c", ".h") else []
+    else:
+        c_files = sorted([
+            f for f in target_path.glob("**/*")
+            if f.is_file()
+            and f.suffix.lower() in (".c", ".h")
+            and not any(p.startswith(".") for p in f.parts)
+            and not (uncompleted_exercises and (any(part in uncompleted_exercises for part in f.parts) or f.stem in uncompleted_exercises))
+        ])
+
+    if not c_files:
+        return []
+
+    # 1. Intentar importación directa de spunkmeyer
+    auditar_fn = None
+    try:
+        from spunkmeyer.core.detector import auditar_archivo
+        auditar_fn = auditar_archivo
+    except ImportError:
+        spunk_src = Path(__file__).resolve().parent.parent.parent.parent / "spunkmeyer" / "src"
+        if spunk_src.is_dir():
+            import sys
+            if str(spunk_src) not in sys.path:
+                sys.path.insert(0, str(spunk_src))
+            try:
+                from spunkmeyer.core.detector import auditar_archivo
+                auditar_fn = auditar_archivo
+            except ImportError:
+                auditar_fn = None
+
+    if auditar_fn is not None:
+        for f in c_files:
+            try:
+                aps = auditar_fn(f)
+                for ap in aps:
+                    rc = str(ap.codigo)
+                    if checks and not checks.ban_feof_loop and rc == "0x4002h":
+                        continue
+                    findings.append({
+                        "rule_code": rc,
+                        "alias": getattr(ap, "alias", ""),
+                        "name": getattr(ap, "nombre", "Antipatrón didáctico"),
+                        "file": f.name,
+                        "line": ap.linea,
+                        "column": ap.columna,
+                        "message": ap.mensaje,
+                        "explanation": getattr(ap, "explicacion", ""),
+                        "suggestion": ap.sugerencia,
+                        "code_line": getattr(ap, "codigo_linea", ""),
+                        "example_bad": getattr(ap, "ejemplo_incorrecto", ""),
+                        "example_good": getattr(ap, "ejemplo_correcto", ""),
+                    })
+            except Exception:
+                pass
+        return findings
+
+    # 2. Invocación mediante CLI de spunkmeyer
+    spunk_bin = shutil.which("spunkmeyer") or (
+        Path.home() / ".local" / "bin" / "spunkmeyer"
+        if (Path.home() / ".local" / "bin" / "spunkmeyer").is_file()
+        else None
+    )
+    if spunk_bin:
+        try:
+            cmd = [str(spunk_bin), "detect"] + [str(f) for f in c_files] + ["--json"]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+            if proc.stdout.strip():
+                data = json.loads(proc.stdout)
+                for ap in data.get("antipatrones", []):
+                    rc = str(ap.get("codigo", "0x0000h"))
+                    if checks and not checks.ban_feof_loop and rc == "0x4002h":
+                        continue
+                    findings.append({
+                        "rule_code": rc,
+                        "alias": ap.get("alias", ""),
+                        "name": ap.get("nombre", "Antipatrón didáctico"),
+                        "file": Path(ap.get("archivo", "")).name,
+                        "line": ap.get("linea", 1),
+                        "column": ap.get("columna", 1),
+                        "message": ap.get("mensaje", ""),
+                        "explanation": ap.get("explicacion", ""),
+                        "suggestion": ap.get("sugerencia", ""),
+                        "code_line": ap.get("codigo_linea", ""),
+                        "example_bad": ap.get("ejemplo_incorrecto", ""),
+                        "example_good": ap.get("ejemplo_correcto", ""),
+                    })
+                return findings
+        except Exception:
+            pass
+
+    # 3. Fallback nativo ante ausencia de instalación externa
+    for f in c_files:
+        try:
+            txt = f.read_text(encoding="utf-8", errors="replace")
+            for idx, line in enumerate(txt.splitlines(), start=1):
+                if re.search(r"while\s*\(\s*!\s*feof\s*\(", line):
+                    if not checks or checks.ban_feof_loop:
+                        findings.append({
+                            "rule_code": "0x4002h",
+                            "alias": "AP002",
+                            "name": "Control de lectura con while(!feof())",
+                            "file": f.name,
+                            "line": idx,
+                            "column": 1,
+                            "message": "Usar '!feof(f)' como condición del bucle procesa el último registro dos veces.",
+                            "explanation": "'feof()' solo devuelve verdadero después de un intento fallido de lectura.",
+                            "suggestion": "Controlá el bucle con el valor de retorno de la función de lectura: 'while (fread(...) == 1)'.",
+                            "code_line": line.strip(),
+                            "example_bad": "while (!feof(f)) { ... }",
+                            "example_good": "while (fread(...) == 1) { ... }",
+                        })
+                if re.search(r"\(\s*[a-zA-Z0-9_]+\s*\*\s*\)\s*malloc\s*\(", line):
+                    findings.append({
+                        "rule_code": "0x300Ah",
+                        "alias": "AP001",
+                        "name": "Casteo redundante de malloc()",
+                        "file": f.name,
+                        "line": idx,
+                        "column": 1,
+                        "message": "Castear el retorno de 'malloc()' es innecesario en C.",
+                        "explanation": "En C, 'void*' se promociona automáticamente a cualquier puntero.",
+                        "suggestion": "Escribí 'ptr = malloc(...);' directamente sin casteo.",
+                        "code_line": line.strip(),
+                        "example_bad": "int *p = (int *)malloc(...);",
+                        "example_good": "int *p = malloc(...);",
+                    })
+        except Exception:
+            pass
+
+    return findings
 
 
 def _run_single_case_in_sandbox(
@@ -880,6 +1022,15 @@ def run_ripley_analysis(
         )
         res_dict["style_findings"] = style_findings
         res_dict["style_metrics"] = style_metrics
+
+    # 8b. Auditoría de antipatrones didácticos (Spunkmeyer)
+    if checks.spunkmeyer_enabled:
+        spunkmeyer_findings = audit_antipatterns_with_spunkmeyer(
+            target_path,
+            checks=checks,
+            uncompleted_exercises=uncompleted_set,
+        )
+        res_dict["spunkmeyer_findings"] = spunkmeyer_findings
 
     # 9. Inyección de hallazgos de binarios prohibidos
     res_dict["binary_findings"] = binary_findings
