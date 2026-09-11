@@ -290,6 +290,10 @@ class MappingRule:
     plantilla: Optional[str] = None
     checks: Optional[Dict[str, Any]] = None
     mode: Optional[str] = None  # "archivos_individuales", "makefiles_individuales", "proyecto"
+    source: str = "moodle"      # "moodle" o "github"
+    github_org: Optional[str] = None
+    repo_pattern: Optional[str] = None
+    branch: Optional[str] = None
 
     def matches_zip(self, zip_filename: str) -> bool:
         """Verifica si el nombre de archivo ZIP coincide con el patrón configurado."""
@@ -298,6 +302,13 @@ class MappingRule:
             return True
         pat_clean = self.zip_pattern.replace("*", "").strip()
         return bool(pat_clean and pat_clean.lower() in name.lower())
+
+    def matches_github_repo(self, repo_name: str) -> bool:
+        """Verifica si el nombre del repositorio coincide con el patrón de GitHub configurado."""
+        name = Path(repo_name).name
+        if self.repo_pattern:
+            return fnmatch.fnmatch(name.lower(), self.repo_pattern.lower())
+        return self.entrega.lower() in name.lower()
 
     def matches_activity(self, activity_slug: str) -> bool:
         """Verifica si el slug de actividad coincide con esta regla."""
@@ -320,6 +331,8 @@ class WorkspaceSettings:
     plantillas_dir: str = "plantillas"
     default_org: str = "INGCOM-UNRN-P1"
     default_mode: str = "auto"
+    default_source: str = "moodle"  # "moodle", "github", "hibrido"
+    github_default_branch: str = "main"
 
 
 @dataclass
@@ -475,6 +488,14 @@ class DreddConfig:
                 item["descripcion"] = m.descripcion
             if m.checks:
                 item["checks"] = m.checks
+            if m.source and m.source != "moodle":
+                item["source"] = m.source
+            if m.github_org:
+                item["github_org"] = m.github_org
+            if m.repo_pattern:
+                item["repo_pattern"] = m.repo_pattern
+            if m.branch:
+                item["branch"] = m.branch
             mapeos_list.append(item)
 
         data = {
@@ -487,6 +508,8 @@ class DreddConfig:
                 "plantillas_dir": self.workspace.plantillas_dir,
                 "default_org": self.workspace.default_org,
                 "default_mode": self.workspace.default_mode,
+                "default_source": self.workspace.default_source,
+                "github_default_branch": self.workspace.github_default_branch,
             },
             "checks": self.checks.to_dict(),
             "mapeos": mapeos_list,
@@ -514,6 +537,8 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
                         plantillas_dir=ws_raw.get("plantillas_dir", "plantillas"),
                         default_org=ws_raw.get("default_org", "INGCOM-UNRN-P1"),
                         default_mode=ws_raw.get("default_mode", "auto"),
+                        default_source=ws_raw.get("default_source", "moodle"),
+                        github_default_branch=ws_raw.get("github_default_branch", "main"),
                     )
 
                     checks_cfg = ToolChecksConfig.from_dict(raw.get("checks", {}))
@@ -532,6 +557,10 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
                                     plantilla=m.get("plantilla"),
                                     checks=m.get("checks"),
                                     mode=m.get("mode") or m.get("tipo_entrega"),
+                                    source=m.get("source", "moodle"),
+                                    github_org=m.get("github_org"),
+                                    repo_pattern=m.get("repo_pattern"),
+                                    branch=m.get("branch"),
                                 )
                             )
                     return DreddConfig(

@@ -938,14 +938,17 @@ def cmd_config_show(
     console.print("\n")
     t_map = Table(title="Entregas y Mapeos de Actividades")
     t_map.add_column("Entrega (Slug)", style="bold cyan")
-    t_map.add_column("Patrón ZIP", style="yellow")
+    t_map.add_column("Origen", justify="center")
+    t_map.add_column("Patrón / Repo", style="yellow")
     t_map.add_column("Guía Deckard", style="green")
     t_map.add_column("Título")
     t_map.add_column("Overrides de Chequeo")
 
     for m in cfg.mapeos:
         overrides_str = ", ".join(f"{k}: {v}" for k, v in (m.checks or {}).items()) or "[dim]Hereda global[/dim]"
-        t_map.add_row(m.entrega, m.zip_pattern, m.guia or "—", m.titulo or "—", overrides_str)
+        src_label = "[cyan]GitHub[/cyan]" if getattr(m, "source", "moodle").lower() == "github" else "[magenta]Moodle[/magenta]"
+        pat = getattr(m, "repo_pattern", None) if getattr(m, "source", "moodle").lower() == "github" else m.zip_pattern
+        t_map.add_row(m.entrega, src_label, pat or m.zip_pattern, m.guia or "—", m.titulo or "—", overrides_str)
 
     console.print(t_map)
     console.print("")
@@ -974,9 +977,13 @@ def cmd_config_add_entrega(
         "-m",
         help="Modo de construcción para esta entrega ('archivos_individuales', 'makefiles_individuales' o 'proyecto').",
     ),
+    source: str = typer.Option("moodle", "--source", "-s", help="Origen de la entrega ('moodle' para ZIPs o 'github' para repositorios)."),
+    github_org: Optional[str] = typer.Option(None, "--github-org", help="Organización de GitHub Classroom para esta entrega."),
+    repo_pattern: Optional[str] = typer.Option(None, "--repo-pattern", help="Patrón o prefijo del nombre de repositorio en GitHub."),
+    branch: Optional[str] = typer.Option("main", "--branch", help="Rama por defecto para clonar/evaluar en GitHub."),
     workspace: Path = typer.Option(Path("."), "--workspace", "-w", help="Directorio raíz del workspace."),
 ) -> None:
-    """Agrega o actualiza una entrega en dredd.yaml con su patrón ZIP, guía Deckard, modo y chequeos específicos."""
+    """Agrega o actualiza una entrega en dredd.yaml con su patrón ZIP, origen Moodle/GitHub, guía Deckard, modo y chequeos específicos."""
     from dredd.core.config import load_dredd_config, MappingRule
 
     cfg = load_dredd_config(workspace)
@@ -1000,12 +1007,22 @@ def cmd_config_add_entrega(
         titulo=titulo,
         checks=checks_dict if checks_dict else None,
         mode=mode,
+        source=source,
+        github_org=github_org,
+        repo_pattern=repo_pattern,
+        branch=branch,
     )
     cfg.add_or_update_mapping(rule)
     cfg.save()
 
     console.print(f"\n[bold green]✓ Entrega '{entrega}' guardada exitosamente en dredd.yaml:[/bold green]")
-    console.print(f"  • [bold]Patrón ZIP:[/bold] [yellow]{zip_pattern}[/yellow]")
+    console.print(f"  • [bold]Origen:[/bold] [cyan]{source.upper()}[/cyan]")
+    if source.lower() == "github" or repo_pattern:
+        console.print(f"  • [bold]GitHub Org:[/bold] [cyan]{github_org or cfg.workspace.default_org}[/cyan]")
+        console.print(f"  • [bold]Patrón Repo:[/bold] [yellow]{repo_pattern or entrega + '-*'}[/yellow]")
+        console.print(f"  • [bold]Rama:[/bold] [magenta]{branch or 'main'}[/magenta]")
+    else:
+        console.print(f"  • [bold]Patrón ZIP:[/bold] [yellow]{zip_pattern}[/yellow]")
     console.print(f"  • [bold]Guía Deckard:[/bold] [cyan]{guia or 'No asignada'}[/cyan]")
     console.print(f"  • [bold]Modo de entrega:[/bold] [magenta]{mode or 'Auto / Heredado'}[/magenta]")
     console.print(f"  • [bold]Título:[/bold] {titulo or '—'}")
