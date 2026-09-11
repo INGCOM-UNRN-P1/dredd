@@ -858,8 +858,16 @@ def generate_personalized_feedback_markdown(
     metadata: Optional[RepoMetadata] = None,
     guide: Optional[Any] = None,
     revision: Optional[str] = None,
+    template_path: Optional[Path] = None,
 ) -> str:
     """Genera una devolución personalizada en Markdown lista para adjuntar en Moodle / GitHub Classroom PR."""
+    if template_path:
+        from dredd.core.feedback_template import extract_context_from_analysis, load_and_render_feedback_template
+        ctx = extract_context_from_analysis(analysis, student_name=student_name, exercise_name=exercise_name)
+        if revision:
+            ctx["revision"] = revision
+        return load_and_render_feedback_template(template_path, ctx)
+
     comp = analysis.get("compilation", {})
     ast = analysis.get("ast_findings", [])
     tests = analysis.get("tests", {})

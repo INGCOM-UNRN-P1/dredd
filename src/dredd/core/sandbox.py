@@ -10,6 +10,8 @@ import shutil
 import subprocess
 from typing import Dict, List, Optional, Tuple
 
+from dredd.core.output_sanitizer import sanitize_output
+
 
 DANGEROUS_CALLS_REGEX = re.compile(
     r"\b("
@@ -192,11 +194,11 @@ def execute_sandboxed(
                 cwd=cwd_dir,
             )
             if proc.returncode == 0 or "bwrap:" not in proc.stderr:
-                return proc.returncode, proc.stdout, proc.stderr, False
+                return proc.returncode, sanitize_output(proc.stdout), sanitize_output(proc.stderr), False
         except subprocess.TimeoutExpired as e:
             stdout_txt = e.stdout.decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
             stderr_txt = e.stderr.decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
-            return -1, stdout_txt, f"[TIMEOUT] Proceso cancelado tras {timeout}s: {stderr_txt}", True
+            return -1, sanitize_output(stdout_txt), sanitize_output(f"[TIMEOUT] Proceso cancelado tras {timeout}s: {stderr_txt}"), True
         except Exception:
             pass
 
@@ -211,11 +213,11 @@ def execute_sandboxed(
             cwd=cwd_dir,
             preexec_fn=lambda: _set_resource_limits(max_memory_mb=max_memory_mb, max_cpu_seconds=int(timeout) + 1),
         )
-        return proc.returncode, proc.stdout, proc.stderr, False
+        return proc.returncode, sanitize_output(proc.stdout), sanitize_output(proc.stderr), False
     except subprocess.TimeoutExpired as e:
         stdout_txt = e.stdout.decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
         stderr_txt = e.stderr.decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
-        return -1, stdout_txt, f"[TIMEOUT / MEMORY EXCEEDED] Proceso cancelado tras {timeout}s: {stderr_txt}", True
+        return -1, sanitize_output(stdout_txt), sanitize_output(f"[TIMEOUT / MEMORY EXCEEDED] Proceso cancelado tras {timeout}s: {stderr_txt}"), True
     except Exception as e:
         return -1, "", f"Error de ejecución en sandbox: {e}", False
 
@@ -276,11 +278,11 @@ def execute_shielded_sandbox(
                 cwd=cwd_dir,
             )
             if proc.returncode == 0 or "bwrap:" not in proc.stderr:
-                return proc.returncode, proc.stdout, proc.stderr, False
+                return proc.returncode, sanitize_output(proc.stdout), sanitize_output(proc.stderr), False
         except subprocess.TimeoutExpired as e:
             stdout_txt = e.stdout.decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
             stderr_txt = e.stderr.decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
-            return -1, stdout_txt, f"[TIMEOUT BLINDADO] Proceso abortado tras {timeout}s: {stderr_txt}", True
+            return -1, sanitize_output(stdout_txt), sanitize_output(f"[TIMEOUT BLINDADO] Proceso abortado tras {timeout}s: {stderr_txt}"), True
         except Exception:
             pass
 
@@ -298,12 +300,10 @@ def execute_shielded_sandbox(
                 max_cpu_seconds=int(timeout) + 1,
             ),
         )
-        return proc.returncode, proc.stdout, proc.stderr, False
+        return proc.returncode, sanitize_output(proc.stdout), sanitize_output(proc.stderr), False
     except subprocess.TimeoutExpired as e:
         stdout_txt = e.stdout.decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
         stderr_txt = e.stderr.decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
-        return -1, stdout_txt, f"[TIMEOUT / CGROUP OVERFLOW] Abortado por cuota de recursos: {stderr_txt}", True
+        return -1, sanitize_output(stdout_txt), sanitize_output(f"[TIMEOUT / CGROUP OVERFLOW] Abortado por cuota de recursos: {stderr_txt}"), True
     except Exception as e:
         return -1, "", f"Error en sandbox blindado: {e}", False
-
-

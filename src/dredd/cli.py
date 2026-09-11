@@ -1595,6 +1595,74 @@ def cmd_eval_shielded(
         console.print(f"[bold yellow]STDERR:[/bold yellow]\n{err}")
 
 
+@app.command("report-template")
+def cmd_report_template(
+    template: Optional[Path] = typer.Option(None, "--template", "-t", help="Ruta a la plantilla Markdown con variables contextuales."),
+    student: str = typer.Option("estudiante_ejemplo", "--student", "-s", help="Identificador o nombre del estudiante."),
+    exercise: str = typer.Option("guia_c", "--exercise", "-e", help="Nombre del ejercicio o TP."),
+    score: str = typer.Option("9.0", "--score", help="Calificación para la previsualización."),
+    total_tests: int = typer.Option(10, "--total-tests", help="Total de casos de prueba."),
+    passed_tests: int = typer.Option(9, "--passed-tests", help="Casos de prueba aprobados."),
+    failures: str = typer.Option("Caso límite 02: retorno inesperado", "--failures", help="Descripción o detalle de fallos."),
+    memory_summary: str = typer.Option("✓ Sin fugas de memoria (0 bytes perdidos)", "--memory-summary", help="Resumen de memoria dinámica."),
+    badge: str = typer.Option("✅ **ENTREGA APROBADA**", "--badge", help="Insignia de estado general."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Guardar el reporte renderizado en un archivo."),
+    dump_default: bool = typer.Option(False, "--dump-default", help="Imprimir o guardar la plantilla por defecto sin renderizar."),
+) -> None:
+    """Renderiza o valida plantillas de feedback Markdown enriquecidas con variables contextuales."""
+    from dredd.core.feedback_template import DEFAULT_FEEDBACK_TEMPLATE, load_and_render_feedback_template
+
+    if dump_default:
+        if output:
+            output.write_text(DEFAULT_FEEDBACK_TEMPLATE, encoding="utf-8")
+            console.print(f"[bold green]✓ Plantilla por defecto exportada a:[/bold green] [cyan]{output}[/cyan]")
+        else:
+            console.print(DEFAULT_FEEDBACK_TEMPLATE)
+        return
+
+    ctx = {
+        "student_id": student,
+        "student_name": student,
+        "exercise_name": exercise,
+        "score": score,
+        "total_tests": total_tests,
+        "passed_tests": passed_tests,
+        "failed_tests": max(0, total_tests - passed_tests),
+        "failures": failures,
+        "memory_summary": memory_summary,
+        "badge": badge,
+    }
+
+    rendered = load_and_render_feedback_template(template, ctx)
+
+    if output:
+        output.write_text(rendered, encoding="utf-8")
+        console.print(f"[bold green]✓ Feedback renderizado guardado en:[/bold green] [cyan]{output}[/cyan]")
+    else:
+        console.print("\n[bold cyan]─── Previsualización de Devolución Pedagógica ───[/bold cyan]\n")
+        console.print(rendered)
+
+
+@app.command("sanitize-output")
+def cmd_sanitize_output(
+    file: Path = typer.Argument(..., help="Archivo de log o volcado de salida a sanitizar."),
+    max_mb: int = typer.Option(10, "--max-mb", help="Límite máximo seguro en megabytes antes de truncar."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Archivo de destino (por defecto sobrescribe el original)."),
+    no_strip_ansi: bool = typer.Option(False, "--no-strip-ansi", help="No remover secuencias de escape ANSI."),
+) -> None:
+    """Sanitiza flujos de salida o logs estudiantiles eliminando secuencias ANSI y truncando si excede el límite."""
+    from dredd.core.output_sanitizer import sanitize_log_file
+
+    if not file.is_file():
+        console.print(f"[bold red]Error: El archivo '{file}' no existe.[/bold red]")
+        raise typer.Exit(code=1)
+
+    max_bytes = max_mb * 1024 * 1024
+    out_target = sanitize_log_file(file, output_path=output, max_bytes=max_bytes)
+    console.print(f"[bold green]✓ Archivo sanitizado con éxito en:[/bold green] [cyan]{out_target}[/cyan]")
+
+
+
 
 
 
