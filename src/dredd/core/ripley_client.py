@@ -570,11 +570,27 @@ def run_ripley_analysis(
     elif effective_mode == MODE_PROYECTO:
         from dredd.core.compiler import compile_with_make
 
+        # 1. Limpieza inicial opcional en la raíz
+        try:
+            subprocess.run(
+                ["make", "-C", str(target_path), "clean"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except Exception:
+            pass
+
+        # 2. Compilación del proyecto ejecutando únicamente el Makefile en la raíz
         comp_make = compile_with_make(target_path)
         ast_findings = _collect_ast_findings()
 
+        # 3. Ejecución de pruebas del proyecto si el Makefile raíz define target 'test' o 'check'
         test_cases = []
         test_ok = True
+        has_test_target = False
+        test_output_log = ""
+
         try:
             p_test = subprocess.run(
                 ["make", "-C", str(target_path), "test"],
@@ -582,36 +598,45 @@ def run_ripley_analysis(
                 text=True,
                 timeout=60,
             )
-            if p_test.returncode == 0:
-                test_cases.append({
-                    "name": "make_test",
-                    "passed": True,
-                    "memory_leak": False,
-                    "sanitizer_error": "",
-                })
-            else:
-                test_ok = False
-                test_cases.append({
-                    "name": "make_test",
-                    "passed": False,
-                    "memory_leak": False,
-                    "sanitizer_error": (
-                        p_test.stderr or p_test.stdout
-                    ).strip()[:300],
-                })
-        except Exception:
-            pass
+            out_combined = f"{p_test.stdout}\n{p_test.stderr}".strip()
+            test_output_log = out_combined
+            no_rule = "no rule to make target" in out_combined.lower() or "no hay regla para construir" in out_combined.lower()
+
+            if not no_rule:
+                has_test_target = True
+                if p_test.returncode == 0:
+                    test_cases.append({
+                        "name": "make_test",
+                        "passed": True,
+                        "memory_leak": False,
+                        "sanitizer_error": "",
+                    })
+                else:
+                    test_ok = False
+                    test_cases.append({
+                        "name": "make_test",
+                        "passed": False,
+                        "memory_leak": False,
+                        "sanitizer_error": out_combined[:600],
+                    })
+        except Exception as e:
+            test_output_log = str(e)
 
         full_proj_log = getattr(comp_make, "full_output", comp_make.raw_stderr)
+        if test_output_log and has_test_target:
+            full_proj_log += f"\n\n=== make test ===\n{test_output_log}"
+
         res_dict = {
             "version": "2.0.0",
+            "is_project": True,
             "compilation": {
-                "success": comp_make.success and test_ok,
+                "success": comp_make.success and (test_ok if has_test_target else True),
                 "raw_stderr": comp_make.raw_stderr,
                 "raw_stdout": getattr(comp_make, "raw_stdout", ""),
                 "full_output": full_proj_log,
                 "translated_diagnostics": comp_make.translated_diagnostics,
                 "compiler_used": "make_proyecto",
+                "is_project": True,
             },
             "ast_findings": ast_findings,
             "tests": {
@@ -619,6 +644,8 @@ def run_ripley_analysis(
                 "passed": sum(1 for c in test_cases if c.get("passed")),
                 "failed": sum(1 for c in test_cases if not c.get("passed")),
                 "cases": test_cases,
+                "is_project": True,
+                "has_test_target": has_test_target,
             },
             "metrics": {"c_files_count": len(c_files)},
         }
@@ -793,17 +820,21 @@ def run_ripley_analysis(
         )
         if guide_tests:
             all_tests.extend(guide_tests)
-    else:
+    elif effective_mode != MODE_PROYECTO:
         local_tests = discover_and_run_local_testcases(target_path)
         if local_tests:
             all_tests.extend(local_tests)
 
     if all_tests:
+        is_proj = (effective_mode == MODE_PROYECTO) or res_dict.get("is_project", False)
+        has_tt = res_dict.get("tests", {}).get("has_test_target", False)
         res_dict["tests"] = {
             "total": len(all_tests),
             "passed": sum(1 for c in all_tests if c.get("passed")),
             "failed": sum(1 for c in all_tests if not c.get("passed")),
             "cases": all_tests,
+            "is_project": is_proj,
+            "has_test_target": has_tt,
         }
 
     # 7. Consolidar reporte de Valgrind / Memoria

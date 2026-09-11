@@ -382,6 +382,10 @@ class DreddConfig:
             return normalize_delivery_mode(guide_mode)
 
         if target_path and target_path.is_dir():
+            # Si hay un Makefile en la raíz, es un proyecto y se ejecuta exclusivamente el Makefile raíz
+            if (target_path / "Makefile").is_file() or (target_path / "makefile").is_file():
+                return MODE_PROYECTO
+
             has_sub_makefiles = bool(
                 list(target_path.glob("ejercicio*/Makefile"))
                 + list(target_path.glob("ejercicio*/makefile"))
@@ -392,9 +396,6 @@ class DreddConfig:
             )
             if has_sub_makefiles:
                 return MODE_MAKEFILES_INDIVIDUALES
-
-            if (target_path / "Makefile").is_file() or (target_path / "makefile").is_file():
-                return MODE_PROYECTO
 
         return MODE_ARCHIVOS_INDIVIDUALES
 

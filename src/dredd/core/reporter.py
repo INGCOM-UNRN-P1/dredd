@@ -312,47 +312,63 @@ def write_individual_tool_reports(
         generated["enunciado"] = enunc_path
 
     # 1. Daedalus (Compilación)
-    compiler_used = comp.get("compiler_used", "gcc").upper()
-    comp_lines = [f"## Compilación — Daedalus ({compiler_used})"]
-    if comp.get("success"):
-        comp_lines.append("\n✓ **Estado:** Compilación exitosa sin errores bloqueantes.")
-    else:
-        comp_lines.append("\n❌ **Estado:** Falló la compilación.")
-        if comp.get("human_summary"):
-            comp_lines.append(f"\n**Diagnóstico general:** {comp['human_summary']}")
-
-    if files_comp:
-        comp_lines.append("\n### Estado de Compilación por Archivo")
-        comp_lines.append("| Archivo | Estado | Compilador |")
-        comp_lines.append("| :--- | :---: | :---: |")
-        for f_name, f_data in sorted(files_comp.items()):
-            st = "✓ OK" if f_data.get("success") else "❌ Error"
-            cu = f_data.get("compiler_used", "gcc").upper()
-            comp_lines.append(f"| `{f_name}` | **{st}** | {cu} |")
-
-    diags = comp.get("translated_diagnostics", [])
-    if diags:
-        comp_lines.append("\n### Diagnósticos del Compilador Traducidos")
-        comp_lines.append("| Archivo:Línea | Severidad | Mensaje Traducido | Sugerencia |")
-        comp_lines.append("| :--- | :---: | :--- | :--- |")
-        for d in diags:
-            sug = d.get("suggestion", "")
-            comp_lines.append(f"| `{d.get('file')}:{d.get('line')}` | **{d.get('severity')}** | {d.get('translated_message')} | {sug} |")
-    elif comp.get("raw_stderr"):
-        comp_lines.append("\n```text")
-        comp_lines.append(comp["raw_stderr"][:1200])
-        comp_lines.append("```")
-
+    is_project = comp.get("is_project") or comp.get("compiler_used") in ("make_proyecto", "make_project")
     if rni_dir.name.startswith("i_"):
         r_tag = rni_dir.name[2:]
     else:
         m_rev = re.search(r"\d+", rni_dir.name)
         r_tag = f"r{m_rev.group(0)}" if m_rev else "r1"
-    comp_lines.append(f"\n> 📄 **Salida completa de compilación:** registrada en `compilacion_{r_tag}.log`.")
 
-    daed_path = rni_dir / "daedalus.md"
-    daed_path.write_text("\n".join(comp_lines) + "\n", encoding="utf-8")
-    generated["daedalus"] = daed_path
+    if is_project:
+        comp_lines = ["## Compilación — Makefile raíz del Proyecto"]
+        if comp.get("success"):
+            comp_lines.append("\n✓ **Estado:** Compilación exitosa ejecutando el Makefile en la raíz (`make`).")
+        else:
+            comp_lines.append("\n❌ **Estado:** Falló la compilación mediante el Makefile de la raíz.")
+            if comp.get("raw_stderr"):
+                comp_lines.append(f"\n```text\n{comp['raw_stderr'][:1200]}\n```")
+
+        comp_lines.append(f"\n> 📄 **Salida completa:** registrada en `compilacion_{r_tag}.log`.")
+        daed_path = rni_dir / "daedalus.md"
+        daed_path.write_text("\n".join(comp_lines) + "\n", encoding="utf-8")
+        generated["daedalus"] = daed_path
+    else:
+        compiler_used = comp.get("compiler_used", "gcc").upper()
+        comp_lines = [f"## Compilación — Daedalus ({compiler_used})"]
+        if comp.get("success"):
+            comp_lines.append("\n✓ **Estado:** Compilación exitosa sin errores bloqueantes.")
+        else:
+            comp_lines.append("\n❌ **Estado:** Falló la compilación.")
+            if comp.get("human_summary"):
+                comp_lines.append(f"\n**Diagnóstico general:** {comp['human_summary']}")
+
+        if files_comp:
+            comp_lines.append("\n### Estado de Compilación por Archivo")
+            comp_lines.append("| Archivo | Estado | Compilador |")
+            comp_lines.append("| :--- | :---: | :---: |")
+            for f_name, f_data in sorted(files_comp.items()):
+                st = "✓ OK" if f_data.get("success") else "❌ Error"
+                cu = f_data.get("compiler_used", "gcc").upper()
+                comp_lines.append(f"| `{f_name}` | **{st}** | {cu} |")
+
+        diags = comp.get("translated_diagnostics", [])
+        if diags:
+            comp_lines.append("\n### Diagnósticos del Compilador Traducidos")
+            comp_lines.append("| Archivo:Línea | Severidad | Mensaje Traducido | Sugerencia |")
+            comp_lines.append("| :--- | :---: | :--- | :--- |")
+            for d in diags:
+                sug = d.get("suggestion", "")
+                comp_lines.append(f"| `{d.get('file')}:{d.get('line')}` | **{d.get('severity')}** | {d.get('translated_message')} | {sug} |")
+        elif comp.get("raw_stderr"):
+            comp_lines.append("\n```text")
+            comp_lines.append(comp["raw_stderr"][:1200])
+            comp_lines.append("```")
+
+        comp_lines.append(f"\n> 📄 **Salida completa de compilación:** registrada en `compilacion_{r_tag}.log`.")
+
+        daed_path = rni_dir / "daedalus.md"
+        daed_path.write_text("\n".join(comp_lines) + "\n", encoding="utf-8")
+        generated["daedalus"] = daed_path
 
     # 2. Ripley (Reglas P1 / AST)
     ast_p1_findings = [f for f in ast_findings if not (f.get("rule_code") or "").startswith("SEC_") and not f.get("rule_name", "").startswith("[SEGURIDAD]")]
@@ -400,11 +416,30 @@ def write_individual_tool_reports(
     generated["spunkmeyer"] = spk_path
 
     # 5. Tests (Casos de prueba y Sandbox)
-    test_lines = ["## Pruebas Funcionales y Casos de Test — Sandbox"]
-    if tests.get("total", 0) > 0 or cases:
+    is_project_tests = tests.get("is_project") or comp.get("is_project")
+    if is_project_tests:
+        test_lines = ["## Pruebas del Proyecto — Makefile raíz (`make test`)"]
+        if tests.get("cases"):
+            tc = tests["cases"][0]
+            if tc.get("passed"):
+                test_lines.append("\n✓ **Estado:** Pruebas del proyecto aprobadas con éxito (`make test`).")
+            else:
+                test_lines.append("\n❌ **Estado:** Fallaron las pruebas del proyecto (`make test`).")
+                err_msg = tc.get("sanitizer_error", "")
+                if err_msg:
+                    test_lines.append(f"\n```text\n{err_msg[:1200]}\n```")
+        elif tests.get("has_test_target") is False:
+            test_lines.append("\n*El Makefile raíz no define un target 'test' automatizado.*")
+        else:
+            test_lines.append("\n*No se ejecutaron casos de prueba automatizados para esta entrega.*")
+        test_path = rni_dir / "tests.md"
+        test_path.write_text("\n".join(test_lines) + "\n", encoding="utf-8")
+        generated["tests"] = test_path
+    elif tests.get("total", 0) > 0 or cases:
         passed_cnt = tests.get("passed", sum(1 for c in cases if c.get("passed")))
         total_cnt = tests.get("total", len(cases))
         rate = (passed_cnt / total_cnt * 100) if total_cnt > 0 else 0
+        test_lines = ["## Pruebas Funcionales y Casos de Test — Sandbox"]
         test_lines.append(f"\n**Resultado general:** {passed_cnt} / {total_cnt} pruebas aprobadas ({rate:.1f}% de éxito).\n")
         test_lines.append("| Caso de Prueba | Estado | Código Retorno | Fuga Memoria | Diagnóstico |")
         test_lines.append("| :--- | :---: | :---: | :---: | :--- |")
@@ -433,10 +468,15 @@ def write_individual_tool_reports(
                     test_lines.append(f"- **Diferencia (Diff):**\n```diff\n{fc.get('diff').strip()}\n```")
                 if fc.get("sanitizer_error"):
                     test_lines.append(f"- **Error / Diagnóstico:** {fc.get('sanitizer_error')}\n")
+        test_path = rni_dir / "tests.md"
+        test_path.write_text("\n".join(test_lines) + "\n", encoding="utf-8")
+        generated["tests"] = test_path
     else:
+        test_lines = ["## Pruebas Funcionales y Casos de Test — Sandbox"]
         test_lines.append("\n*No se ejecutaron casos de prueba automatizados para esta entrega.*")
-    test_path = rni_dir / "tests.md"
-    test_path.write_text("\n".join(test_lines) + "\n", encoding="utf-8")
+        test_path = rni_dir / "tests.md"
+        test_path.write_text("\n".join(test_lines) + "\n", encoding="utf-8")
+        generated["tests"] = test_path
     generated["tests"] = test_path
 
     # 6. Valgrind (Auditoría de Memoria Dinámica / Heap)
@@ -901,14 +941,21 @@ def generate_personalized_feedback_markdown(
 
     if binaries:
         lines.append(f"- **Archivos Binarios (.o, .a, .exe):** ❌ Se detectaron **{len(binaries)}** archivo(s) binario(s) prohibido(s) que fueron filtrados.")
-    lines.append(f"- **Compilación ({comp.get('compiler_used', 'GCC').upper()}):** {'✓ Exitosa' if comp.get('success') else '✖ Falló'}")
+    is_proj = comp.get("is_project") or comp.get("compiler_used") in ("make_proyecto", "make_project")
+    if is_proj:
+        lines.append(f"- **Compilación (Makefile raíz):** {'✓ Exitosa' if comp.get('success') else '✖ Falló'}")
+        if tests.get("has_test_target"):
+            t_ok = tests.get("failed", 0) == 0 and tests.get("passed", 0) > 0
+            lines.append(f"- **Pruebas de proyecto (make test):** {'✓ Aprobadas' if t_ok else '✖ Fallaron'}")
+    else:
+        lines.append(f"- **Compilación ({comp.get('compiler_used', 'GCC').upper()}):** {'✓ Exitosa' if comp.get('success') else '✖ Falló'}")
     lines.append(f"- **Reglas P1 / Calidad:** {len(ast)} observación(es) detectada(s)")
     lines.append(f"- **Estilo y Formato (Gaff):** {'✓ Conforme' if not style else f'⚠️ {len(style)} observación(es)'}")
     if val.get("executed"):
         val_lost = val.get("definitely_lost_bytes", 0)
         val_msg = "✓ Sin fugas (0 bytes perdidos)" if val.get("clean") else f"❌ Fuga detectada ({val_lost} B perdidos)"
         lines.append(f"- **Memoria Dinámica (Valgrind):** {val_msg}")
-    if tests.get("total", 0) > 0:
+    if not is_proj and tests.get("total", 0) > 0:
         lines.append(f"- **Casos de prueba:** {tests.get('passed', 0)}/{tests.get('total', 0)} aprobados")
 
     # Acciones concretas sugeridas
