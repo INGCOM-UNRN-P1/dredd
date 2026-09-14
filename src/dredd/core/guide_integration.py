@@ -97,7 +97,7 @@ def _parse_ripkg_payload(ripkg_path: Path) -> Dict[str, Any]:
                 except Exception:
                     pass
             # 2. Enunciado / consigna
-            for enunc_name in ["payload/enunciado.md", "enunciado.md", "payload/consigna.md", "consigna.md", "payload/README.md", "README.md"]:
+            for enunc_name in ["payload/enunciado.md", "enunciado.md", "payload/consigna.md", "consigna.md"]:
                 if enunc_name in names:
                     info["enunciado"] = z.read(enunc_name).decode("utf-8", errors="replace").strip()
                     break
@@ -230,7 +230,7 @@ def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None) ->
                         "salida": f_out.read_text(encoding="utf-8", errors="replace") if f_out.is_file() else "",
                     })
             if not ex_enunciado:
-                for cand_en in [ex_dir / "enunciado.md", ex_dir / "consigna.md", ex_dir / "README.md"]:
+                for cand_en in [ex_dir / "enunciado.md", ex_dir / "consigna.md"]:
                     if cand_en.is_file():
                         ex_enunciado = cand_en.read_text(encoding="utf-8", errors="replace").strip()
                         break
@@ -269,10 +269,6 @@ def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None) ->
         gdir / "enunciado.md",
         gdir / "consigna.md",
         gdir / "guia.md",
-        gdir / "README.md",
-        gdir.parent / "enunciado.md",
-        gdir.parent / "consigna.md",
-        gdir.parent / "README.md",
     ]:
         if enunc_cand.is_file():
             general_enunciado = enunc_cand.read_text(encoding="utf-8", errors="replace").strip()
@@ -329,7 +325,7 @@ def _parse_guide_from_exercise_dirs(guide_dir: Path, exercise_dirs: List[Path]) 
                     "salida": f_out.read_text(encoding="utf-8", errors="replace") if f_out.is_file() else "",
                 })
 
-        for cand_en in [ed / "enunciado.md", ed / "consigna.md", ed / "README.md"]:
+        for cand_en in [ed / "enunciado.md", ed / "consigna.md"]:
             if cand_en.is_file():
                 ex_enunciado = cand_en.read_text(encoding="utf-8", errors="replace").strip()
                 break
@@ -354,7 +350,7 @@ def _parse_guide_from_exercise_dirs(guide_dir: Path, exercise_dirs: List[Path]) 
 
     general_enunciado = ""
     general_path = None
-    for cand_en in [guide_dir / "enunciado.md", guide_dir / "consigna.md", guide_dir / "README.md", guide_dir.parent / "README.md"]:
+    for cand_en in [guide_dir / "enunciado.md", guide_dir / "consigna.md"]:
         if cand_en.is_file():
             general_enunciado = cand_en.read_text(encoding="utf-8", errors="replace").strip()
             general_path = cand_en
@@ -415,10 +411,6 @@ def load_guide_from_deckard_dir(deckard_dir: Path) -> Optional[ActivityGuide]:
         for enunc_cand in [
             deckard_dir / "enunciado.md",
             deckard_dir / "consigna.md",
-            deckard_dir / "README.md",
-            deckard_dir.parent / "enunciado.md",
-            deckard_dir.parent / "consigna.md",
-            deckard_dir.parent / "README.md",
         ]:
             if enunc_cand.is_file():
                 general_enunciado = enunc_cand.read_text(encoding="utf-8", errors="replace").strip()

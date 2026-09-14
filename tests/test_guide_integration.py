@@ -295,9 +295,10 @@ def test_fallback_to_general_config_when_deckard_absent(tmp_path: Path):
     assert guide.enunciado == "# Consigna Oficial"
 
 
-def test_reporter_writes_enunciado_markdown(tmp_path: Path):
+def test_reporter_does_not_write_enunciado_markdown(tmp_path: Path):
     from dredd.core.guide_integration import ActivityGuide, GuideExercise
-    from dredd.core.reporter import write_individual_tool_reports
+    from dredd.core.reporter import write_individual_tool_reports, generate_consolidated_report_from_rni
+    from dredd.core.git_ops import RepoMetadata
 
     guide = ActivityGuide(
         nombre="Trabajo Práctico 1",
@@ -315,10 +316,19 @@ def test_reporter_writes_enunciado_markdown(tmp_path: Path):
     )
     rni = tmp_path / "r1_f"
     generated = write_individual_tool_reports(rni, {}, guide=guide)
-    assert "enunciado" in generated
-    assert (rni / "enunciado.md").is_file()
-    content = (rni / "enunciado.md").read_text(encoding="utf-8")
-    assert "## 📋 Consigna y Enunciado — Trabajo Práctico 1" in content
-    assert "# Consigna Global del TP1" in content
-    assert "Desarrollar la función f(x)" in content
-    assert "Revisar caso x=0" in content
+    assert "enunciado" not in generated
+    assert not (rni / "enunciado.md").is_file()
+
+    meta = RepoMetadata(branch="main", revision="abc1234", date_str="2026-08-24")
+    out_file = tmp_path / "informe.md"
+    rep_content = generate_consolidated_report_from_rni(
+        rni_dir=rni,
+        exercise="tp1",
+        student="alumno1",
+        metadata=meta,
+        template_dir=tmp_path / "tpl",
+        output_file=out_file,
+        guide=guide,
+    )
+    assert "Consigna Global del TP1" not in rep_content
+    assert "Origen de consigna" not in rep_content

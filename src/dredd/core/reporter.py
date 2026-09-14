@@ -284,32 +284,6 @@ def write_individual_tool_reports(
         bin_path.write_text("\n".join(bin_lines) + "\n", encoding="utf-8")
         generated["binarios"] = bin_path
 
-    # 0.6. Enunciado y Consigna de la Actividad (enunciado.md)
-    if guide and (getattr(guide, "enunciado", "") or any(getattr(e, "enunciado", "") for e in getattr(guide, "exercises", []))):
-        enunc_lines = [
-            f"## 📋 Consigna y Enunciado — {guide.nombre}\n",
-        ]
-        if getattr(guide, "enunciado_source", None):
-            enunc_lines.append(f"> 📌 **Origen del enunciado:** `{guide.enunciado_source}`\n")
-        if getattr(guide, "enunciado", ""):
-            enunc_lines.append(guide.enunciado)
-            enunc_lines.append("\n---\n")
-
-        sub_enuncs = [e for e in getattr(guide, "exercises", []) if getattr(e, "enunciado", "")]
-        if sub_enuncs:
-            enunc_lines.append("### Requerimientos por Ejercicio\n")
-            for e in sub_enuncs:
-                enunc_lines.append(f"#### `{e.display_name}`\n")
-                enunc_lines.append(e.enunciado)
-                if getattr(e, "pistas", []):
-                    enunc_lines.append("\n**Pistas didácticas:**")
-                    for p in e.pistas:
-                        enunc_lines.append(f"- {p}")
-                enunc_lines.append("")
-
-        enunc_path = rni_dir / "enunciado.md"
-        enunc_path.write_text("\n".join(enunc_lines) + "\n", encoding="utf-8")
-        generated["enunciado"] = enunc_path
 
     # 1. Daedalus (Compilación)
     is_project = comp.get("is_project") or comp.get("compiler_used") in ("make_proyecto", "make_project")
@@ -643,8 +617,6 @@ def generate_consolidated_report_from_rni(
     if guide and getattr(guide, "exercises", None):
         lines.append("\n## Especificación de la Guía")
         lines.append(f"**Guía vinculada:** `{guide.nombre}`")
-        if getattr(guide, "enunciado_source", None):
-            lines.append(f"**Origen de consigna:** `{guide.enunciado_source}`")
         ejs_str = ", ".join(f"`{e.display_name}`" for e in guide.exercises)
         lines.append(f"**Ejercicios requeridos:** {ejs_str}")
         b_info = (analysis or {}).get("baseline_info", {})
@@ -666,7 +638,6 @@ def generate_consolidated_report_from_rni(
     priority_order = [
         "resumen.md",
         "binarios.md",
-        "enunciado.md",
         "daedalus.md",
         "ripley.md",
         "tests.md",
@@ -712,8 +683,17 @@ def generate_consolidated_report_from_rni(
                 included_files.add(p_file.name)
 
         # Incluir cualquier otra herramienta arbitraria presente en rNi/*.md
+        archivos_no_herramientas = {
+            "informe.md",
+            "informe_consolidado.md",
+            "enunciado.md",
+            "consigna.md",
+            "readme.md",
+            "manual.md",
+            "docs.md",
+        }
         for other_md in sorted(rni_dir.glob("*.md")):
-            if other_md.name not in included_files and other_md.name not in ("informe.md", "informe_consolidado.md"):
+            if other_md.name not in included_files and other_md.name.lower() not in archivos_no_herramientas:
                 content = other_md.read_text(encoding="utf-8", errors="replace").strip()
                 if content:
                     lines.append("\n" + content)
