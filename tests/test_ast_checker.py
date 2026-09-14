@@ -100,7 +100,7 @@ int main(void) {
 
     # 1. Chequeo directo de audit_style_with_gaff sobre archivo
     findings, _ = audit_style_with_gaff(src)
-    msgs = [f["message"] for f in findings if f["rule_code"] in ("0x0001h", "GAFF011")]
+    msgs = [f["message"] for f in findings if f["rule_code"] in ("0x0001h", "0x0101h", "GAFF011")]
     assert any("'id'" in m for m in msgs)
     assert any("'aux'" in m for m in msgs)
     assert any("variable_con_nombre_super" in m for m in msgs)
@@ -109,7 +109,7 @@ int main(void) {
     strict_cfg = ToolChecksConfig.get_strict_preset()
     res = run_ripley_analysis(tmp_path, checks_override=strict_cfg)
     style_findings = res.get("style_findings", [])
-    style_msgs = [f["message"] for f in style_findings if f["rule_code"] in ("0x0001h", "GAFF011")]
+    style_msgs = [f["message"] for f in style_findings if f["rule_code"] in ("0x0001h", "0x0101h", "GAFF011")]
     assert any("'id'" in m for m in style_msgs)
     assert any("'aux'" in m for m in style_msgs)
     assert any("variable_con_nombre_super" in m for m in style_msgs)

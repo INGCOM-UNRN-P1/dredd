@@ -24,7 +24,7 @@ class ToolChecksConfig:
     ripley_strict: bool = False
     ripley_rules: List[str] = field(default_factory=list)  # Vacío = todas las reglas
     ripley_disabled_rules: List[str] = field(default_factory=list)  # ej. ["0x0009h"]
-    ripley_max_function_lines: int = 50
+    ripley_max_function_lines: int = 40
     ripley_max_line_length: int = 80
 
     # Kaneda / Seguridad
@@ -142,7 +142,7 @@ class ToolChecksConfig:
             ripley_strict=ripley_data.get("strict", data.get("ripley_strict", False)),
             ripley_rules=ripley_data.get("rules", data.get("ripley_rules", [])),
             ripley_disabled_rules=ripley_data.get("disabled_rules", data.get("ripley_disabled_rules", [])),
-            ripley_max_function_lines=int(ripley_data.get("max_function_lines", 50)),
+            ripley_max_function_lines=int(ripley_data.get("max_function_lines", 40)),
             ripley_max_line_length=int(ripley_data.get("max_line_length", 80)),
             kaneda_enabled=kaneda_data.get("enabled", data.get("kaneda_enabled", True)),
             ban_dangerous_calls=kaneda_data.get("ban_dangerous_calls", data.get("ban_dangerous_calls", True)),
