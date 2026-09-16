@@ -22,6 +22,112 @@ class CompilationResult:
     returncode: int = 0
 
 
+def _try_import_daedalus():
+    try:
+        from daedalus.core.compiler import compilar_archivos
+        return compilar_archivos
+    except ImportError:
+        sibling_daedalus = Path(__file__).resolve().parents[3] / "daedalus" / "src"
+        if sibling_daedalus.is_dir() and str(sibling_daedalus) not in sys.path:
+            sys.path.insert(0, str(sibling_daedalus))
+            try:
+                from daedalus.core.compiler import compilar_archivos
+                return compilar_archivos
+            except ImportError:
+                return None
+        return None
+
+
+def compile_with_daedalus(
+    c_files: List[Path],
+    output_bin: Optional[Path] = None,
+    extra_flags: Optional[List[str]] = None,
+) -> Optional[CompilationResult]:
+    """Intenta compilar usando el motor o CLI de DAEDALUS con diagnósticos pedagógicos en español."""
+    compilar_fn = _try_import_daedalus()
+    if compilar_fn:
+        try:
+            res = compilar_fn(c_files, binario_salida=output_bin, flags_adicionales=extra_flags)
+            diags = []
+            for d in res.diagnosticos:
+                sev = d.severidad.upper()
+                tr_msg = f"{d.titulo}: {d.explicacion}" if d.titulo and d.explicacion else (d.titulo or d.explicacion or d.mensaje_original)
+                diags.append({
+                    "file": d.archivo or "",
+                    "line": d.linea or 1,
+                    "severity": sev,
+                    "translated_message": tr_msg,
+                    "suggestion": d.sugerencia,
+                    "raw_message": d.mensaje_original,
+                    "code_snippet": d.code_snippet,
+                    "flag": d.flag,
+                    "citation": d.cita_iso_c,
+                })
+            raw_err = res.stderr_crudo or ""
+            raw_out = res.stdout_crudo or ""
+            full_out = f"{raw_out}\n{raw_err}".strip() if (raw_out and raw_err) else (raw_err or raw_out)
+            return CompilationResult(
+                success=res.exito,
+                output_bin=res.binario if res.exito and res.binario else None,
+                raw_stderr=raw_err,
+                raw_stdout=raw_out,
+                full_output=full_out,
+                translated_diagnostics=diags,
+                compiler_used="daedalus",
+                command=["daedalus", "compile"] + [str(f) for f in c_files],
+                returncode=res.codigo_retorno,
+            )
+        except Exception:
+            pass
+
+    daedalus_bin = shutil.which("daedalus") or (Path.home() / ".local" / "bin" / "daedalus" if (Path.home() / ".local" / "bin" / "daedalus").is_file() else None)
+    if daedalus_bin:
+        try:
+            cmd = [str(daedalus_bin), "compile"] + [str(f) for f in c_files] + ["--json"]
+            if output_bin:
+                cmd.extend(["-o", str(output_bin)])
+            if extra_flags:
+                cmd.extend(["--flags", " ".join(extra_flags)])
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if proc.stdout.strip():
+                data = json.loads(proc.stdout)
+                raw_diags = data.get("diagnosticos", [])
+                diags = []
+                for d in raw_diags:
+                    sev = str(d.get("severidad", "ERROR")).upper()
+                    tit = d.get("titulo", "")
+                    exp = d.get("explicacion", "")
+                    tr_msg = f"{tit}: {exp}" if tit and exp else (tit or exp or d.get("mensaje_original", ""))
+                    diags.append({
+                        "file": d.get("archivo", ""),
+                        "line": d.get("linea", 1),
+                        "severity": sev,
+                        "translated_message": tr_msg,
+                        "suggestion": d.get("sugerencia", ""),
+                        "raw_message": d.get("mensaje_original", ""),
+                        "code_snippet": d.get("code_snippet"),
+                        "flag": d.get("flag"),
+                        "citation": d.get("cita_iso_c") or d.get("iso_c_citation"),
+                    })
+                exito = data.get("exito", proc.returncode == 0)
+                raw_err = proc.stderr
+                return CompilationResult(
+                    success=exito,
+                    output_bin=output_bin if exito and output_bin else None,
+                    raw_stderr=raw_err,
+                    raw_stdout=proc.stdout,
+                    full_output=raw_err or proc.stderr,
+                    translated_diagnostics=diags,
+                    compiler_used="daedalus",
+                    command=cmd,
+                    returncode=proc.returncode,
+                )
+        except Exception:
+            pass
+
+    return None
+
+
 def _try_import_esper():
     try:
         from esper.core.gcc_parser import run_gcc_and_explain
@@ -44,7 +150,12 @@ def compile_with_esper(
     output_bin: Optional[Path] = None,
     extra_flags: Optional[List[str]] = None,
 ) -> Optional[CompilationResult]:
-    """Intenta compilar usando la biblioteca o CLI de ESPER."""
+    """Intenta compilar usando la biblioteca o CLI de ESPER (o delega en DAEDALUS)."""
+    # Preferir delegar en Daedalus si está disponible
+    daed_res = compile_with_daedalus(c_files, output_bin=output_bin, extra_flags=extra_flags)
+    if daed_res is not None:
+        return daed_res
+
     out_target = str(output_bin) if output_bin else "/dev/null"
     flags = extra_flags or ["-Wall", "-Wextra", "-std=c11"]
     args = flags + [str(f) for f in c_files] + ["-o", out_target]
@@ -170,7 +281,7 @@ def compile_c_sources(
     output_bin: Optional[Path] = None,
     extra_flags: Optional[List[str]] = None,
 ) -> CompilationResult:
-    """Compila archivos C utilizando prioritariamente ESPER, con fallback transparente a GCC."""
+    """Compila archivos C utilizando prioritariamente DAEDALUS, con fallback a ESPER y GCC."""
     if not c_files:
         return CompilationResult(
             success=False,
@@ -180,20 +291,25 @@ def compile_c_sources(
             returncode=1,
         )
 
-    # 1. Intentar compilar con ESPER
+    # 1. Intentar compilar con DAEDALUS
+    daed_res = compile_with_daedalus(c_files, output_bin=output_bin, extra_flags=extra_flags)
+    if daed_res is not None:
+        return daed_res
+
+    # 2. Intentar compilar con ESPER
     esper_res = compile_with_esper(c_files, output_bin=output_bin, extra_flags=extra_flags)
     if esper_res is not None:
         return esper_res
 
-    # 2. Fallback a GCC
+    # 3. Fallback a GCC
     gcc_res = compile_with_gcc(c_files, output_bin=output_bin, extra_flags=extra_flags)
     if gcc_res is not None:
         return gcc_res
 
     return CompilationResult(
         success=False,
-        raw_stderr="Ni ESPER ni GCC se encuentran disponibles en el sistema.",
-        full_output="Ni ESPER ni GCC se encuentran disponibles en el sistema.",
+        raw_stderr="Ni DAEDALUS, ni ESPER, ni GCC se encuentran disponibles en el sistema.",
+        full_output="Ni DAEDALUS, ni ESPER, ni GCC se encuentran disponibles en el sistema.",
         compiler_used="none",
         returncode=1,
     )

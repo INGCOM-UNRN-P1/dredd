@@ -50,7 +50,7 @@ class ToolChecksConfig:
     enforce_variable_length: bool = True
 
     # Daedalus / Compilador
-    daedalus_compiler: str = "esper"  # "esper", "gcc", "clang"
+    daedalus_compiler: str = "daedalus"  # "daedalus", "esper", "gcc", "clang"
     compiler_flags: str = "-Wall -Wextra -std=c11"
     treat_warnings_as_errors: bool = False
 
@@ -103,7 +103,7 @@ class ToolChecksConfig:
             enforce_header_guards=True,
             ban_tab_indentation=True,
             enforce_variable_length=True,
-            daedalus_compiler="esper",
+            daedalus_compiler="daedalus",
             compiler_flags="-Wall -Wextra -Werror -pedantic -std=c11 -Wconversion -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Wpointer-arith -Wcast-align -Wwrite-strings -fsanitize=address,undefined",
             treat_warnings_as_errors=True,
             brett_enabled=True,
@@ -160,7 +160,7 @@ class ToolChecksConfig:
             enforce_header_guards=gaff_data.get("enforce_header_guards", True),
             ban_tab_indentation=gaff_data.get("ban_tab_indentation", True),
             enforce_variable_length=gaff_data.get("enforce_variable_length", data.get("enforce_variable_length", True)),
-            daedalus_compiler=daed_data.get("compiler", data.get("daedalus_compiler", "esper")),
+            daedalus_compiler=daed_data.get("compiler", data.get("daedalus_compiler", "daedalus")),
             compiler_flags=daed_data.get("flags", data.get("compiler_flags", "-Wall -Wextra -std=c11")),
             treat_warnings_as_errors=daed_data.get("treat_warnings_as_errors", False),
             brett_enabled=brett_data.get("enabled", True),
@@ -642,7 +642,7 @@ ejercicios:
                 kaneda_enabled=True,
                 spunkmeyer_enabled=True,
                 gaff_enabled=True,
-                daedalus_compiler="esper",
+                daedalus_compiler="daedalus",
                 sandbox_memory_mb=64,
                 sandbox_timeout_seconds=5.0,
             ),
