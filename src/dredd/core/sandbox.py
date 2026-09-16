@@ -156,6 +156,23 @@ def _set_resource_limits(max_memory_mb: int = 64, max_cpu_seconds: int = 5) -> N
         pass
 
 
+def _try_import_nostromo():
+    try:
+        from nostromo.core.sandbox import ejecutar_aislado
+        return ejecutar_aislado
+    except ImportError:
+        import sys
+        sibling = Path(__file__).resolve().parents[3] / "nostromo" / "src"
+        if sibling.is_dir() and str(sibling) not in sys.path:
+            sys.path.insert(0, str(sibling))
+            try:
+                from nostromo.core.sandbox import ejecutar_aislado
+                return ejecutar_aislado
+            except ImportError:
+                return None
+        return None
+
+
 def execute_sandboxed(
     cmd: List[str],
     input_data: str = "",
@@ -163,10 +180,24 @@ def execute_sandboxed(
     max_memory_mb: int = 64,
     workspace: Optional[Path] = None,
 ) -> Tuple[int, str, str, bool]:
-    """Ejecuta un binario C en sandbox con límites estrictos de RAM (64MB) y tiempo.
+    """Ejecuta un binario C en sandbox delegando en nostromo (con fallback bwrap/setrlimit).
     
     Devuelve (returncode, stdout, stderr, timeout_or_killed).
     """
+    nostromo_fn = _try_import_nostromo()
+    if nostromo_fn and cmd:
+        bin_path = Path(cmd[0])
+        res = nostromo_fn(
+            bin_path,
+            args=cmd[1:],
+            stdin_texto=input_data,
+            timeout_segundos=timeout,
+            memoria_mb=max_memory_mb,
+            usar_bwrap=True,
+        )
+        is_timed_out = res.error_tipo == "TIMEOUT"
+        return res.codigo_retorno, sanitize_output(res.stdout), sanitize_output(res.stderr), is_timed_out
+
     bwrap_bin = shutil.which("bwrap")
     cwd_dir = str(workspace.resolve()) if workspace and workspace.is_dir() else None
 
