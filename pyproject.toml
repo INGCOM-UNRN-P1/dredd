@@ -3,7 +3,27 @@ name = "dredd"
 version = "2.0.0"
 description = "Multi-channel batch autograder and submission manager for C programming courses (GitHub Classroom & Moodle)"
 readme = "README.md"
+license = {text = "GPL-3.0-or-later"}
+authors = [
+    {name = "Martín René Vilugrón", email = "martinvilu@gmail.com"}
+]
+maintainers = [
+    {name = "Programación I [B6003] - UNRN Andina"}
+]
 requires-python = ">=3.11"
+keywords = ["education", "c-programming", "pedagogical-tools", "unrn"]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Education",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
 dependencies = [
     "typer>=0.12.0",
     "rich>=13.7.0",
@@ -13,6 +33,11 @@ dependencies = [
     "tree-sitter>=0.23.0",
     "tree-sitter-c>=0.23.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/INGCOM-UNRN-P1/dredd"
+Repository = "https://github.com/INGCOM-UNRN-P1/dredd.git"
+Issues = "https://github.com/INGCOM-UNRN-P1/dredd/issues"
 
 [project.optional-dependencies]
 dev = [
