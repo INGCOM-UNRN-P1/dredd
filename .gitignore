@@ -5,3 +5,7 @@ compile_commands.json
 /*.md
 .cache
 __pycache__
+
+*.py[cod]
+
+.pytest_cache/
