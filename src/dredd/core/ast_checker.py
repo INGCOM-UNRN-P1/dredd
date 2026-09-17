@@ -1,4 +1,10 @@
-"""Linter nativo de reglas de cátedra P1 y verificación estática usando Tree-Sitter AST en Dredd."""
+"""Linter nativo de reglas de cátedra P1 y verificación estática usando Tree-Sitter AST en Dredd.
+
+Este módulo actúa como motor nativo y linter fallback autónomo cuando la herramienta
+especializada de cátedra (`gaff` o `ripley`) no se encuentra instalada en el entorno o cuando
+se requiere verificación rápida e independiente sin dependencias satélite adicionales.
+Implementa un subconjunto canónico de reglas de estilo y arquitectura de Cátedra P1 (0xXXXXh).
+"""
 
 from __future__ import annotations
 

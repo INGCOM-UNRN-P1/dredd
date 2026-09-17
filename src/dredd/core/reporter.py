@@ -307,8 +307,16 @@ def write_individual_tool_reports(
         daed_path.write_text("\n".join(comp_lines) + "\n", encoding="utf-8")
         generated["daedalus"] = daed_path
     else:
-        compiler_used = comp.get("compiler_used", "gcc").upper()
-        comp_lines = [f"## Compilación — Daedalus ({compiler_used})"]
+        raw_compiler = comp.get("compiler_used", "gcc")
+        compiler_upper = raw_compiler.upper()
+        if "daedalus" in raw_compiler.lower():
+            comp_header = f"## Compilación — Daedalus ({compiler_upper})"
+        elif "esper" in raw_compiler.lower():
+            comp_header = f"## Compilación — Esper / GCC ({compiler_upper})"
+        else:
+            comp_header = f"## Compilación — GCC ({compiler_upper})"
+
+        comp_lines = [comp_header]
         if comp.get("success"):
             comp_lines.append("\n✓ **Estado:** Compilación exitosa sin errores bloqueantes.")
         else:
@@ -344,7 +352,7 @@ def write_individual_tool_reports(
         daed_path.write_text("\n".join(comp_lines) + "\n", encoding="utf-8")
         generated["daedalus"] = daed_path
 
-    # 2. Ripley (Reglas P1 / AST)
+    # 2. Linter de Reglas P1 (AST nativo / Ripley)
     gaff_rules = {f"{sf.get('rule_code')}:{sf.get('file')}:{sf.get('line')}" for sf in style_findings}
     gaff_codes = {str(sf.get('rule_code', '')).lower() for sf in style_findings}
     ast_p1_findings = [
@@ -357,7 +365,7 @@ def write_individual_tool_reports(
             or str(f.get("rule_code") or f.get("rule_id", "")).lower() in ("0x0001h", "gaff011", "gaff009", "gaff010", "gaff001", "gaff003", "gaff007")
         ))
     ]
-    rip_lines = ["## Observaciones de Calidad y Reglas P1 — Ripley"]
+    rip_lines = ["## Observaciones de Calidad y Reglas P1 (Linter AST / Ripley)"]
     if ast_p1_findings:
         rip_lines.append(f"\nSe detectaron **{len(ast_p1_findings)}** observación(es) en el código C:\n")
         rip_lines.append("| Regla | Ubicación | Severidad | Observación | Sugerencia |")
@@ -372,9 +380,9 @@ def write_individual_tool_reports(
     rip_path.write_text("\n".join(rip_lines) + "\n", encoding="utf-8")
     generated["ripley"] = rip_path
 
-    # 3. Kaneda (Seguridad)
+    # 3. Auditoría de Seguridad (Sandbox / Kaneda)
     sec_findings = [f for f in ast_findings if (f.get("rule_code") or "").startswith("SEC_") or f.get("rule_name", "").startswith("[SEGURIDAD]")]
-    kan_lines = ["## Auditoría de Seguridad — Kaneda"]
+    kan_lines = ["## Auditoría de Seguridad — Sandbox / Kaneda"]
     if sec_findings:
         kan_lines.append(f"\n⚠️ **Alerta:** Se detectaron **{len(sec_findings)}** llamadas o patrones de riesgo de seguridad:\n")
         kan_lines.append("| Regla | Archivo:Línea | Severidad | Detalle | Sugerencia |")

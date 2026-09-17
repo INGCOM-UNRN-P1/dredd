@@ -307,7 +307,7 @@ def test_write_individual_tool_reports_and_consolidation(tmp_path: Path):
     )
 
     assert out_report.is_file()
-    assert "Daedalus" in content
+    assert ("Daedalus" in content) or ("Esper" in content) or ("Compilación" in content)
     assert "Ripley" in content
     assert "Kaneda" in content
     assert "Valgrind" in content

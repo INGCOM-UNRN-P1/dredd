@@ -11,21 +11,33 @@ from dataclasses import asdict, dataclass, field
 import fnmatch
 from pathlib import Path
 import re
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 import yaml
+
+logger = logging.getLogger("dredd.config")
 
 
 @dataclass
 class ToolChecksConfig:
     """Configuración de verificaciones de herramientas pedagógicas y estáticas."""
 
-    # Ripley (P1 rules / AST) - deshabilitado por defecto para no duplicar a Gaff
+    # Linter de reglas P1 (AST nativo / Ripley satélite)
     ripley_enabled: bool = False
     ripley_strict: bool = False
     ripley_rules: List[str] = field(default_factory=list)  # Vacío = todas las reglas
     ripley_disabled_rules: List[str] = field(default_factory=list)  # ej. ["0x0009h"]
     ripley_max_function_lines: int = 40
     ripley_max_line_length: int = 80
+
+    @property
+    def p1_linter_enabled(self) -> bool:
+        """Alias transparente de ripley_enabled para la verificación de reglas de cátedra P1 vía AST/Ripley."""
+        return self.ripley_enabled
+
+    @p1_linter_enabled.setter
+    def p1_linter_enabled(self, value: bool) -> None:
+        self.ripley_enabled = value
 
     # Kaneda / Seguridad
     kaneda_enabled: bool = True
@@ -126,7 +138,7 @@ class ToolChecksConfig:
         if not data:
             return cls()
 
-        ripley_data = data.get("ripley", {})
+        ripley_data = data.get("ripley") or data.get("p1_linter") or data.get("ast_checker") or {}
         kaneda_data = data.get("kaneda", {})
         spunk_data = data.get("spunkmeyer", {})
         gaff_data = data.get("gaff", {})
@@ -138,7 +150,7 @@ class ToolChecksConfig:
         plag_data = data.get("plagiarism", {})
 
         return cls(
-            ripley_enabled=ripley_data.get("enabled", data.get("ripley_enabled", False)),
+            ripley_enabled=ripley_data.get("enabled", data.get("ripley_enabled", data.get("p1_linter_enabled", False))),
             ripley_strict=ripley_data.get("strict", data.get("ripley_strict", False)),
             ripley_rules=ripley_data.get("rules", data.get("ripley_rules", [])),
             ripley_disabled_rules=ripley_data.get("disabled_rules", data.get("ripley_disabled_rules", [])),
@@ -528,6 +540,19 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
             if cand.is_file():
                 try:
                     raw = yaml.safe_load(cand.read_text(encoding="utf-8")) or {}
+                    if not isinstance(raw, dict):
+                        logger.warning(f"Formato inválido en archivo de configuración {cand}: se esperaba un diccionario YAML.")
+                        continue
+
+                    # Advertir claves de primer nivel desconocidas
+                    KNOWN_ROOT_KEYS = {"workspace", "checks", "mapeos", "version"}
+                    unknown_keys = set(raw.keys()) - KNOWN_ROOT_KEYS
+                    if unknown_keys:
+                        logger.warning(
+                            f"Claves desconocidas detectadas en {cand}: {sorted(unknown_keys)}. "
+                            f"Claves admitidas: {sorted(KNOWN_ROOT_KEYS)}."
+                        )
+
                     ws_raw = raw.get("workspace", {})
                     ws = WorkspaceSettings(
                         name=ws_raw.get("name", "Cátedra Programación 1"),
@@ -571,8 +596,8 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
                         raw_data=raw,
                         config_path=cand,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Error al procesar configuración de Dredd en {cand}: {e}")
 
     return None
 

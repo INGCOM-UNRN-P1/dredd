@@ -35,6 +35,28 @@ app.add_typer(evaluate_app, name="evaluate")
 console = Console()
 
 
+def version_callback(value: bool) -> None:
+    if value:
+        from dredd import __version__
+        console.print(f"dredd {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: Optional[bool] = typer.Option(
+        None,
+        "--version",
+        "-v",
+        help="Muestra la versión instalada de Dredd y finaliza.",
+        callback=version_callback,
+        is_eager=True,
+    ),
+) -> None:
+    """Orquestador docente de evaluación masiva y gestión de entregas (GitHub Classroom + Moodle)."""
+    pass
+
+
 @app.command("init")
 def cmd_init(
     path: Path = typer.Argument(Path("."), help="Directorio raíz donde inicializar el workspace de Dredd."),
@@ -86,6 +108,7 @@ def ejecutar_evaluacion(
     failed_only: bool = False,
     workspace_dir: Optional[Path] = None,
     baseline: Optional[Path] = None,
+    json_output: bool = False,
 ) -> None:
     """Ejecuta el ciclo de evaluación sobre una o varias entregas de estudiantes."""
     from dredd.core.reporter import is_submission_failed
@@ -103,6 +126,10 @@ def ejecutar_evaluacion(
     baseline = _unwrap_cli_value(baseline, None)
     if baseline is not None and not isinstance(baseline, Path):
         baseline = Path(baseline)
+    workspace_dir = _unwrap_cli_value(workspace_dir, None)
+    if workspace_dir is not None and not isinstance(workspace_dir, Path):
+        workspace_dir = Path(workspace_dir)
+    json_output = bool(_unwrap_cli_value(json_output, False))
     ws_dir = (workspace_dir or Path.cwd()).resolve()
 
     exercise_slug, submissions_dir = resolve_submissions_dir(ws_dir, exercise)
@@ -155,9 +182,11 @@ def ejecutar_evaluacion(
         return
 
     if guide and guide.exercises:
-        console.print(f"[bold green]✓ Guía Deckard conectada ('{guide.nombre}'): {len(guide.exercises)} ejercicio(s) ({', '.join(guide.get_exercise_ids())}) | Modo: {effective_tipo}[/bold green]")
+        if not json_output:
+            console.print(f"[bold green]✓ Guía Deckard conectada ('{guide.nombre}'): {len(guide.exercises)} ejercicio(s) ({', '.join(guide.get_exercise_ids())}) | Modo: {effective_tipo}[/bold green]")
     else:
-        console.print(f"[bold blue]Modo de construcción activo: {effective_tipo}[/bold blue]")
+        if not json_output:
+            console.print(f"[bold blue]Modo de construcción activo: {effective_tipo}[/bold blue]")
 
     table = Table(title=f"Evaluación Dredd — {exercise_slug}")
     table.add_column("Estudiante", style="cyan", justify="left")
@@ -166,14 +195,24 @@ def ejecutar_evaluacion(
     table.add_column("Reglas P1 / AST", justify="center")
     table.add_column("Informe", style="green")
 
+    json_results: List[Dict[str, Any]] = []
+
     for s_name in target_students:
-        console.print(f"[bold]Procesando estudiante:[/bold] [cyan]{s_name}[/cyan]...")
+        if not json_output:
+            console.print(f"[bold]Procesando estudiante:[/bold] [cyan]{s_name}[/cyan]...")
 
         try:
             repo_path = ensure_submission_repo(org, exercise_slug, s_name, ws_dir, submissions_dir=submissions_dir)
         except Exception as e:
-            console.print(f"  [red]Error al obtener repositorio:[/red] {e}")
-            table.add_row(s_name, "[red]ERROR[/red]", "—", "—", "No generado")
+            if not json_output:
+                console.print(f"  [red]Error al obtener repositorio:[/red] {e}")
+                table.add_row(s_name, "[red]ERROR[/red]", "—", "—", "No generado")
+            else:
+                json_results.append({
+                    "student": s_name,
+                    "success": False,
+                    "error": str(e),
+                })
             continue
 
         repo_sub = repo_path / "repo"
@@ -246,9 +285,27 @@ def ejecutar_evaluacion(
             student_label = f"{s_name} [{rev_str}]" if len(all_revs) > 1 else s_name
             table.add_row(student_label, comp_str, tests_str, ast_str, display_path)
 
-    console.print("\n")
-    console.print(table)
-    console.print("\n[dim]Para enviar los comentarios a los PRs correspondientes, ejecute: dredd github comment <ejercicio> <estudiante>[/dim]\n")
+            json_results.append({
+                "student": s_name,
+                "revision": rev_str,
+                "compilation_ok": comp_ok,
+                "tests_passed": tests_info.get("passed", 0),
+                "tests_total": tests_info.get("total", 0),
+                "ast_observations": ast_count,
+                "report_file": str(report_file),
+            })
+
+    if json_output:
+        import json
+        print(json.dumps({
+            "exercise": exercise_slug,
+            "total_students": len(json_results),
+            "results": json_results,
+        }, indent=2, ensure_ascii=False))
+    else:
+        console.print("\n")
+        console.print(table)
+        console.print("\n[dim]Para enviar los comentarios a los PRs correspondientes, ejecute: dredd github comment <ejercicio> <estudiante>[/dim]\n")
 
 
 @app.command("eval")
@@ -288,6 +345,17 @@ def cmd_eval(
         "-f",
         help="Fuerza la re-evaluación completa eliminando resultados previos de las carpetas de estudiantes.",
     ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emite el resultado estructurado de la evaluación en formato JSON (máquina a máquina).",
+    ),
+    workspace: Path = typer.Option(
+        Path("."),
+        "--workspace",
+        "-w",
+        help="Directorio raíz del workspace.",
+    ),
 ) -> None:
     """Clona/actualiza el repositorio o evalúa entregas locales, ejecuta el análisis con Ripley y genera el informe Markdown."""
     if exercise == "clean":
@@ -316,6 +384,8 @@ def cmd_eval(
         tipo_entrega=tipo_entrega,
         dry_run=dry_run,
         baseline=baseline,
+        json_output=json_output,
+        workspace_dir=workspace,
     )
 
 
@@ -853,18 +923,12 @@ def cmd_multiplex(
     pack: bool = typer.Option(True, "--pack/--no-pack", help="Generar paquetes .ripkg para cada variante."),
     starters: bool = typer.Option(True, "--starters/--no-starters", help="Generar starter repos por alumno."),
 ) -> None:
-    """tp-multiplexer: Genera variantes combinatorias y asignación determinista por alumno."""
-    import shutil
+    """Alias docente de conveniencia que delega la generación de variantes y asignación en Deckard."""
     import subprocess
-    import sys
+    from dredd.core.ecosystem import resolve_sibling_cli, resolve_sibling_tool
 
     # 1. Intentar ejecución vía CLI de deckard
-    deckard_bin = shutil.which("deckard")
-    if not deckard_bin:
-        cand = Path(__file__).resolve().parent.parent.parent.parent / "deckard" / ".venv" / "bin" / "deckard"
-        if cand.is_file():
-            deckard_bin = str(cand)
-
+    deckard_bin = resolve_sibling_cli("deckard")
     if deckard_bin:
         args = [deckard_bin, "multiplex", "--spec", str(spec), "-o", str(salida)]
         if students:
@@ -881,25 +945,29 @@ def cmd_multiplex(
         raise typer.Exit(code=proc.returncode)
 
     # 2. Fallback por import directo
-    try:
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent / "deckard" / "src"))
-        from deckard.core.multiplex import multiplexar_tp
+    multiplexar_tp = resolve_sibling_tool("deckard", "deckard.core.multiplex", "multiplexar_tp")
+    if multiplexar_tp is not None:
+        try:
+            resultado = multiplexar_tp(
+                matriz_path=spec,
+                students_path=students,
+                output_dir=salida,
+                pack_ripkg=pack,
+                generar_starters=starters,
+            )
+            console.print(f"[bold green]✓ Multiplexación completada para '{resultado.ejercicio}'[/bold green]")
+            console.print(f"  • Total de variantes combinatorias: [cyan]{resultado.total_variantes}[/cyan]")
+            console.print(f"  • Directorio de salida: [dim]{resultado.output_dir}[/dim]")
+            if resultado.asignaciones:
+                console.print(f"  • Estudiantes asignados: [green]{len(resultado.asignaciones)}[/green]")
+            return
+        except Exception as e:
+            console.print(f"[bold red]Error en multiplex:[/bold red] {e}")
+            raise typer.Exit(code=1)
 
-        resultado = multiplexar_tp(
-            matriz_path=spec,
-            students_path=students,
-            output_dir=salida,
-            pack_ripkg=pack,
-            generar_starters=starters,
-        )
-        console.print(f"[bold green]✓ Multiplexación completada para '{resultado.ejercicio}'[/bold green]")
-        console.print(f"  • Total de variantes combinatorias: [cyan]{resultado.total_variantes}[/cyan]")
-        console.print(f"  • Directorio de salida: [dim]{resultado.output_dir}[/dim]")
-        if resultado.asignaciones:
-            console.print(f"  • Estudiantes asignados: [green]{len(resultado.asignaciones)}[/green]")
-    except Exception as e:
-        console.print(f"[bold red]Error en multiplex:[/bold red] {e}")
-        raise typer.Exit(code=1)
+    console.print("[bold red]Deckard no está disponible en PATH ni en el entorno hermano.[/bold red]")
+    console.print("  ↳ Instalar o enlazar Deckard: [cyan]pip install -e ../deckard[/cyan]")
+    raise typer.Exit(code=1)
 
 
 # ============================================================================

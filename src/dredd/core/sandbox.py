@@ -52,15 +52,35 @@ class SecurityFinding:
     code_snippet: str = ""
 
 
+def strip_c_comments_and_strings(code: str) -> str:
+    """Elimina comentarios y cadenas literales manteniendo los saltos de línea para conservar número de línea."""
+
+    def replacer(match: re.Match) -> str:
+        s = match.group(0)
+        if s.startswith("/"):
+            # Reemplazar comentarios por espacios en blanco preservando '\n'
+            return re.sub(r"[^\n]", " ", s)
+        else:
+            # String o char literal
+            return '""' + re.sub(r"[^\n]", " ", s[2:])
+
+    pattern = re.compile(
+        r'//.*?$|/\*.*?\*/|\'(?:\\.|[^\\\'])*\'|"(?:\\.|[^\\"])*"',
+        re.DOTALL | re.MULTILINE,
+    )
+    return re.sub(pattern, replacer, code)
+
+
 def audit_sandbox_evasion(code: str, filename: str = "entrega.c") -> List[SecurityFinding]:
     """Audita código fuente C en busca de intentos de evasión de sandbox, fork-bombs o llamadas restringidas."""
     findings: List[SecurityFinding] = []
-    lines = code.splitlines()
+    clean_code = strip_c_comments_and_strings(code)
+    clean_lines = clean_code.splitlines()
+    orig_lines = code.splitlines()
 
     # 1. Chequeo de llamadas a funciones de sistema peligrosas
-    for idx, line in enumerate(lines, start=1):
-        if line.strip().startswith("//") or line.strip().startswith("/*"):
-            continue
+    for idx, line in enumerate(clean_lines, start=1):
+        orig_line = orig_lines[idx - 1] if idx - 1 < len(orig_lines) else line
 
         match = DANGEROUS_CALLS_REGEX.search(line)
         if match:
@@ -73,7 +93,7 @@ def audit_sandbox_evasion(code: str, filename: str = "entrega.c") -> List[Securi
                         message=f"Llamada a `{fn_name}()` prohibida. Posible intento de evadir el entorno de sandbox.",
                         line=idx,
                         rule_code="SEC_EVASION",
-                        code_snippet=line.strip(),
+                        code_snippet=orig_line.strip(),
                     )
                 )
             elif fn_name in ("fork", "clone", "vfork"):
@@ -84,7 +104,7 @@ def audit_sandbox_evasion(code: str, filename: str = "entrega.c") -> List[Securi
                         message=f"Uso de `{fn_name}()` prohibido en la materia. Riesgo de saturación de recursos.",
                         line=idx,
                         rule_code="SEC_FORK",
-                        code_snippet=line.strip(),
+                        code_snippet=orig_line.strip(),
                     )
                 )
             elif fn_name in ("system", "execve", "execvp", "execl", "popen"):
@@ -95,7 +115,7 @@ def audit_sandbox_evasion(code: str, filename: str = "entrega.c") -> List[Securi
                         message=f"Llamada a `{fn_name}()` prohibida. No se permite invocar subprocesos en las entregas.",
                         line=idx,
                         rule_code="SEC_EXEC",
-                        code_snippet=line.strip(),
+                        code_snippet=orig_line.strip(),
                     )
                 )
             elif fn_name in ("socket", "connect", "bind", "listen"):
@@ -106,7 +126,7 @@ def audit_sandbox_evasion(code: str, filename: str = "entrega.c") -> List[Securi
                         message=f"Llamada a `{fn_name}()` prohibida. El acceso a red está deshabilitado.",
                         line=idx,
                         rule_code="SEC_NET",
-                        code_snippet=line.strip(),
+                        code_snippet=orig_line.strip(),
                     )
                 )
 
@@ -119,13 +139,13 @@ def audit_sandbox_evasion(code: str, filename: str = "entrega.c") -> List[Securi
                         message=f"Referencia a `{p_path}` prohibida.",
                         line=idx,
                         rule_code="SEC_PATH",
-                        code_snippet=line.strip(),
+                        code_snippet=orig_line.strip(),
                     )
                 )
 
     # 2. Detección de patrones de fork-bombs
     for pat in FORK_BOMB_PATTERNS:
-        if pat.search(code):
+        if pat.search(clean_code):
             findings.append(
                 SecurityFinding(
                     severity="FATAL",

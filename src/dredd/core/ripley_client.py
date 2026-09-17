@@ -11,7 +11,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 if TYPE_CHECKING:
     from dredd.core.config import ToolChecksConfig
 
+from dredd import __version__
 from dredd.core.compiler import compile_c_sources
+from dredd.core.ecosystem import resolve_sibling_cli, resolve_sibling_tool
 from dredd.core.sandbox import execute_sandboxed, audit_sandbox_evasion
 from dredd.core.valgrind import run_valgrind_check, ValgrindReport
 
@@ -36,26 +38,29 @@ def audit_style_with_gaff(
 
     enforce_var_len = checks.enforce_variable_length if checks else True
 
-    try:
-        from gaff.core.linter import analizar_archivo
+    analizar_archivo = resolve_sibling_tool("gaff", "gaff.core.linter", "analizar_archivo")
+    if analizar_archivo is not None:
         for f in c_and_h_files:
-            viols = analizar_archivo(f)
-            for v in viols:
-                rc = str(v.codigo)
-                if not enforce_var_len and rc in ("0x0001h", "GAFF011"):
-                    continue
-                findings.append({
-                    "rule_code": rc,
-                    "title": v.titulo,
-                    "file": f.name,
-                    "line": v.linea,
-                    "column": v.columna,
-                    "message": v.mensaje,
-                    "suggestion": v.sugerencia,
-                    "autofixable": getattr(v, "es_autofixable", False),
-                })
-    except ImportError:
-        # Fallback de linter de estilo si gaff no está instalado como paquete Python
+            try:
+                viols = analizar_archivo(f)
+                for v in viols:
+                    rc = str(v.codigo)
+                    if not enforce_var_len and rc in ("0x0001h", "GAFF011"):
+                        continue
+                    findings.append({
+                        "rule_code": rc,
+                        "title": v.titulo,
+                        "file": f.name,
+                        "line": v.linea,
+                        "column": v.columna,
+                        "message": v.mensaje,
+                        "suggestion": v.sugerencia,
+                        "autofixable": getattr(v, "es_autofixable", False),
+                    })
+            except Exception:
+                pass
+    else:
+        # Fallback de linter de estilo si gaff no está disponible (usa motor AST nativo)
         from dredd.core.ast_checker import check_regla_0x0001
         for f in c_and_h_files:
             try:
@@ -153,22 +158,8 @@ def audit_antipatterns_with_spunkmeyer(
     if not c_files:
         return []
 
-    # 1. Intentar importación directa de spunkmeyer
-    auditar_fn = None
-    try:
-        from spunkmeyer.core.detector import auditar_archivo
-        auditar_fn = auditar_archivo
-    except ImportError:
-        spunk_src = Path(__file__).resolve().parent.parent.parent.parent / "spunkmeyer" / "src"
-        if spunk_src.is_dir():
-            import sys
-            if str(spunk_src) not in sys.path:
-                sys.path.insert(0, str(spunk_src))
-            try:
-                from spunkmeyer.core.detector import auditar_archivo
-                auditar_fn = auditar_archivo
-            except ImportError:
-                auditar_fn = None
+    # 1. Intentar importación de spunkmeyer mediante resolve_sibling_tool
+    auditar_fn = resolve_sibling_tool("spunkmeyer", "spunkmeyer.core.detector", "auditar_archivo")
 
     if auditar_fn is not None:
         for f in c_files:
@@ -197,11 +188,7 @@ def audit_antipatterns_with_spunkmeyer(
         return findings
 
     # 2. Invocación mediante CLI de spunkmeyer
-    spunk_bin = shutil.which("spunkmeyer") or (
-        Path.home() / ".local" / "bin" / "spunkmeyer"
-        if (Path.home() / ".local" / "bin" / "spunkmeyer").is_file()
-        else None
-    )
+    spunk_bin = resolve_sibling_cli("spunkmeyer")
     if spunk_bin:
         try:
             cmd = [str(spunk_bin), "detect"] + [str(f) for f in c_files] + ["--json"]
@@ -599,14 +586,41 @@ def run_ripley_analysis(
 
     def _collect_ast_findings() -> List[Dict[str, Any]]:
         findings = []
-        # Dredd no invoca a Ripley externo para no duplicar el informe de Gaff
-        if checks.ripley_enabled:
-            from dredd.core.ast_checker import audit_c_file
-            for cf in sorted(target_path.glob("**/*.c")):
-                if not any(part.startswith(".") for part in cf.parts):
-                    if uncompleted_set and (any(part in uncompleted_set for part in cf.parts) or cf.stem in uncompleted_set):
-                        continue
-                    findings.extend(audit_c_file(cf))
+        if not checks.ripley_enabled:
+            return findings
+
+        # Intentar delegación en ripley satélite si está disponible
+        ripley_cli = resolve_sibling_cli("ripley")
+        if ripley_cli:
+            try:
+                cmd = [ripley_cli, "analyze", str(target_path), "--format", "json"]
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                if proc.returncode in (0, 1) and proc.stdout.strip():
+                    data = json.loads(proc.stdout)
+                    raw_findings = data.get("findings") or data.get("hallazgos") or []
+                    for rf in raw_findings:
+                        findings.append({
+                            "rule_code": rf.get("rule_code") or rf.get("code") or "P1",
+                            "rule_name": rf.get("title") or rf.get("rule_name") or "Regla P1",
+                            "severity": rf.get("severity", "ADVERTENCIA"),
+                            "message": rf.get("message", ""),
+                            "suggestion": rf.get("suggestion", ""),
+                            "file": rf.get("file", ""),
+                            "line": rf.get("line", 1),
+                            "column": rf.get("column", 1),
+                        })
+                    if findings:
+                        return findings
+            except Exception:
+                pass
+
+        # Fallback canónico: linter nativo Tree-Sitter AST de Dredd
+        from dredd.core.ast_checker import audit_c_file
+        for cf in sorted(target_path.glob("**/*.c")):
+            if not any(part.startswith(".") for part in cf.parts):
+                if uncompleted_set and (any(part in uncompleted_set for part in cf.parts) or cf.stem in uncompleted_set):
+                    continue
+                findings.extend(audit_c_file(cf))
         return findings
 
     res_dict = None
@@ -635,7 +649,7 @@ def run_ripley_analysis(
                 for m in makefile_results
             )
             res_dict = {
-                "version": "2.0.0",
+                "version": __version__,
                 "compilation": {
                     "success": all_passed,
                     "raw_stderr": "\n".join(
@@ -669,7 +683,7 @@ def run_ripley_analysis(
         ).is_file():
             comp_make = compile_with_make(target_path)
             res_dict = {
-                "version": "2.0.0",
+                "version": __version__,
                 "compilation": {
                     "success": comp_make.success,
                     "raw_stderr": comp_make.raw_stderr,
@@ -684,7 +698,7 @@ def run_ripley_analysis(
             }
         else:
             res_dict = {
-                "version": "2.0.0",
+                "version": __version__,
                 "compilation": {
                     "success": False,
                     "raw_stderr": "No se encontraron sub-Makefiles de ejercicios ni Makefile raíz.",
@@ -756,7 +770,7 @@ def run_ripley_analysis(
             full_proj_log += f"\n\n=== make test ===\n{test_output_log}"
 
         res_dict = {
-            "version": "2.0.0",
+            "version": __version__,
             "is_project": True,
             "compilation": {
                 "success": comp_make.success and (test_ok if has_test_target else True),
@@ -781,16 +795,11 @@ def run_ripley_analysis(
 
     else:
         # Modo 'archivos_individuales'
-        # Dredd no invoca al motor Ripley externo para no duplicar el informe de Gaff.
-        ast_findings = []
-        if checks.ripley_enabled:
-            from dredd.core.ast_checker import audit_c_file
-            for c_file in c_files:
-                ast_findings.extend(audit_c_file(c_file))
+        ast_findings = _collect_ast_findings()
 
         if not c_files:
             res_dict = {
-                "version": "2.0.0",
+                "version": __version__,
                 "compilation": {
                     "success": False,
                     "raw_stderr": "No se encontraron archivos .c",
@@ -844,7 +853,7 @@ def run_ripley_analysis(
                     all_diags.extend(comp_f.translated_diagnostics)
 
             res_dict = {
-                "version": "2.0.0",
+                "version": __version__,
                 "compilation": {
                     "success": files_comp_ok,
                     "raw_stderr": "\n\n".join(all_stderrs),

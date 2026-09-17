@@ -22,20 +22,11 @@ class CompilationResult:
     returncode: int = 0
 
 
+from dredd.core.ecosystem import resolve_sibling_cli, resolve_sibling_tool
+
+
 def _try_import_daedalus():
-    try:
-        from daedalus.core.compiler import compilar_archivos
-        return compilar_archivos
-    except ImportError:
-        sibling_daedalus = Path(__file__).resolve().parents[3] / "daedalus" / "src"
-        if sibling_daedalus.is_dir() and str(sibling_daedalus) not in sys.path:
-            sys.path.insert(0, str(sibling_daedalus))
-            try:
-                from daedalus.core.compiler import compilar_archivos
-                return compilar_archivos
-            except ImportError:
-                return None
-        return None
+    return resolve_sibling_tool("daedalus", "daedalus.core.compiler", "compilar_archivos")
 
 
 def compile_with_daedalus(
@@ -80,7 +71,7 @@ def compile_with_daedalus(
         except Exception:
             pass
 
-    daedalus_bin = shutil.which("daedalus") or (Path.home() / ".local" / "bin" / "daedalus" if (Path.home() / ".local" / "bin" / "daedalus").is_file() else None)
+    daedalus_bin = resolve_sibling_cli("daedalus")
     if daedalus_bin:
         try:
             cmd = [str(daedalus_bin), "compile"] + [str(f) for f in c_files] + ["--json"]
@@ -129,20 +120,7 @@ def compile_with_daedalus(
 
 
 def _try_import_esper():
-    try:
-        from esper.core.gcc_parser import run_gcc_and_explain
-        return run_gcc_and_explain
-    except ImportError:
-        # Intentar ubicar esper en el workspace de herramientas
-        sibling_esper = Path(__file__).resolve().parents[3] / "esper" / "src"
-        if sibling_esper.is_dir() and str(sibling_esper) not in sys.path:
-            sys.path.insert(0, str(sibling_esper))
-            try:
-                from esper.core.gcc_parser import run_gcc_and_explain
-                return run_gcc_and_explain
-            except ImportError:
-                return None
-        return None
+    return resolve_sibling_tool("esper", "esper.core.gcc_parser", "run_gcc_and_explain")
 
 
 def compile_with_esper(
@@ -199,7 +177,7 @@ def compile_with_esper(
             pass
 
     # 2. CLI de esper con --json
-    esper_bin = shutil.which("esper") or (Path.home() / ".local" / "bin" / "esper" if (Path.home() / ".local" / "bin" / "esper").is_file() else None)
+    esper_bin = resolve_sibling_cli("esper")
     if esper_bin:
         try:
             cmd = [str(esper_bin), "compile"] + args + ["--json"]
