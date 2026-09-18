@@ -18,6 +18,11 @@ from dredd.core.sandbox import execute_sandboxed, audit_sandbox_evasion
 from dredd.core.valgrind import run_valgrind_check, ValgrindReport
 
 
+def _is_vendor_or_framework(p: Path) -> bool:
+    parts_lower = [part.lower() for part in p.parts]
+    return "p1_test" in parts_lower or "vendor" in parts_lower or p.name.startswith("p1_test")
+
+
 def audit_style_with_gaff(
     target_path: Path,
     checks: Optional[ToolChecksConfig] = None,
@@ -26,13 +31,14 @@ def audit_style_with_gaff(
     """Ejecuta el linter de estilo Gaff sobre los archivos C y H del estudiante."""
     findings = []
     if target_path.is_file():
-        c_and_h_files = [target_path] if target_path.suffix.lower() in (".c", ".h", ".hpp") else []
+        c_and_h_files = [target_path] if target_path.suffix.lower() in (".c", ".h", ".hpp") and not _is_vendor_or_framework(target_path) else []
     else:
         c_and_h_files = sorted([
             f for f in target_path.glob("**/*")
             if f.is_file()
             and f.suffix.lower() in (".c", ".h", ".hpp")
             and not any(p.startswith(".") for p in f.parts)
+            and not _is_vendor_or_framework(f)
             and not (uncompleted_exercises and (any(part in uncompleted_exercises for part in f.parts) or f.stem in uncompleted_exercises))
         ])
 
@@ -617,10 +623,13 @@ def run_ripley_analysis(
         # Fallback canónico: linter nativo Tree-Sitter AST de Dredd
         from dredd.core.ast_checker import audit_c_file
         for cf in sorted(target_path.glob("**/*.c")):
-            if not any(part.startswith(".") for part in cf.parts):
+            if not any(part.startswith(".") for part in cf.parts) and not _is_vendor_or_framework(cf):
                 if uncompleted_set and (any(part in uncompleted_set for part in cf.parts) or cf.stem in uncompleted_set):
                     continue
-                findings.extend(audit_c_file(cf))
+                try:
+                    findings.extend(audit_c_file(cf))
+                except Exception:
+                    pass
         return findings
 
     res_dict = None

@@ -1,11 +1,18 @@
-"""CLI principal de Dredd: Orquestador de evaluación masiva, autograding y feedback."""
-
+import faulthandler
+import os
 from pathlib import Path
+import sys
 from typing import Any, List, Optional
 import typer
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
+
+# Habilitar volcado de stacktrace nativo de Python ante fallos críticos (SIGSEGV, SIGABRT, SIGFPE, SIGBUS)
+try:
+    faulthandler.enable(all_threads=True)
+except Exception:
+    pass
 
 from dredd.core.git_ops import ensure_submission_repo, get_repo_metadata, resolve_submissions_dir
 from dredd.core.github_api import open_pr_in_browser, post_pr_comment
@@ -245,55 +252,75 @@ def ejecutar_evaluacion(
                 intermediate_dir = repo_path / f"r{rev_identifier}i"
                 report_file = repo_path / f"{s_name}_{rev_str}.md"
 
-            meta = get_repo_metadata(r_path)
-            analysis = run_ripley_analysis(
-                r_path,
-                guide=guide,
-                activity_slug=exercise_slug,
-                workspace_dir=ws_dir,
-                tipo_entrega=effective_tipo,
-                baseline_dir=baseline,
-            )
-
-            generate_student_report(
-                exercise=exercise_slug,
-                student=s_name,
-                repo_path=r_path,
-                metadata=meta,
-                analysis=analysis,
-                template_dir=template_dir,
-                output_file=report_file,
-                revision=rev_str,
-                guide=guide,
-                intermediate_dir=intermediate_dir,
-            )
-
-            comp_ok = analysis.get("compilation", {}).get("success", False)
-            comp_str = "[green]OK[/green]" if comp_ok else "[red]FALLÓ[/red]"
-
-            tests_info = analysis.get("tests", {})
-            tests_str = f"{tests_info.get('passed', 0)}/{tests_info.get('total', 0)}" if tests_info.get("total", 0) > 0 else "N/A"
-
-            ast_count = len(analysis.get("ast_findings", []))
-            ast_str = f"[yellow]{ast_count} obs[/yellow]" if ast_count > 0 else "[green]0 obs[/green]"
-
             try:
-                display_path = str(report_file.relative_to(ws_dir))
-            except ValueError:
-                display_path = str(report_file)
+                meta = get_repo_metadata(r_path)
+                analysis = run_ripley_analysis(
+                    r_path,
+                    guide=guide,
+                    activity_slug=exercise_slug,
+                    workspace_dir=ws_dir,
+                    tipo_entrega=effective_tipo,
+                    baseline_dir=baseline,
+                )
 
-            student_label = f"{s_name} [{rev_str}]" if len(all_revs) > 1 else s_name
-            table.add_row(student_label, comp_str, tests_str, ast_str, display_path)
+                generate_student_report(
+                    exercise=exercise_slug,
+                    student=s_name,
+                    repo_path=r_path,
+                    metadata=meta,
+                    analysis=analysis,
+                    template_dir=template_dir,
+                    output_file=report_file,
+                    revision=rev_str,
+                    guide=guide,
+                    intermediate_dir=intermediate_dir,
+                )
 
-            json_results.append({
-                "student": s_name,
-                "revision": rev_str,
-                "compilation_ok": comp_ok,
-                "tests_passed": tests_info.get("passed", 0),
-                "tests_total": tests_info.get("total", 0),
-                "ast_observations": ast_count,
-                "report_file": str(report_file),
-            })
+                comp_ok = analysis.get("compilation", {}).get("success", False)
+                comp_str = "[green]OK[/green]" if comp_ok else "[red]FALLÓ[/red]"
+
+                tests_info = analysis.get("tests", {})
+                tests_str = f"{tests_info.get('passed', 0)}/{tests_info.get('total', 0)}" if tests_info.get("total", 0) > 0 else "N/A"
+
+                ast_count = len(analysis.get("ast_findings", []))
+                ast_str = f"[yellow]{ast_count} obs[/yellow]" if ast_count > 0 else "[green]0 obs[/green]"
+
+                try:
+                    display_path = str(report_file.relative_to(ws_dir))
+                except ValueError:
+                    display_path = str(report_file)
+
+                student_label = f"{s_name} [{rev_str}]" if len(all_revs) > 1 else s_name
+                table.add_row(student_label, comp_str, tests_str, ast_str, display_path)
+
+                json_results.append({
+                    "student": s_name,
+                    "revision": rev_str,
+                    "compilation_ok": comp_ok,
+                    "tests_passed": tests_info.get("passed", 0),
+                    "tests_total": tests_info.get("total", 0),
+                    "ast_observations": ast_count,
+                    "report_file": str(report_file),
+                })
+            except Exception as e:
+                import traceback
+                error_trace = traceback.format_exc()
+                if not json_output:
+                    console.print(f"  [bold red]Error fatal durante la evaluación de {s_name} ({rev_str}):[/bold red] {e}")
+                    console.print(f"[dim]{error_trace.strip()}[/dim]")
+                    table.add_row(f"{s_name} [{rev_str}]", "[red]ERROR[/red]", "—", "—", f"Fallo: {e}")
+                else:
+                    json_results.append({
+                        "student": s_name,
+                        "revision": rev_str,
+                        "compilation_ok": False,
+                        "tests_passed": 0,
+                        "tests_total": 0,
+                        "ast_observations": 0,
+                        "report_file": str(report_file),
+                        "error": str(e),
+                        "traceback": error_trace,
+                    })
 
     if json_output:
         import json

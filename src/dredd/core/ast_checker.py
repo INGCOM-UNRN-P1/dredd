@@ -8,90 +8,210 @@ Implementa un subconjunto canónico de reglas de estilo y arquitectura de Cáted
 
 from __future__ import annotations
 
+import bisect
 from collections import defaultdict
 from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import tree_sitter_c as tsc
-from tree_sitter import Language, Parser, Node
+from tree_sitter import Language, Parser, Node, Query
+
+try:
+    from tree_sitter import QueryCursor
+except ImportError:
+    QueryCursor = None
+
+
+def _get_line_starts(content_bytes: bytes) -> List[int]:
+    """Calcula los offsets de inicio de cada línea para búsqueda binaria rápida."""
+    starts = [0]
+    for idx, b in enumerate(content_bytes):
+        if b == ord('\n'):
+            starts.append(idx + 1)
+    return starts
+
+
+def _byte_to_line(starts: List[int], byte_offset: int) -> int:
+    """Traduce un offset de byte a un número de línea 1-indexed mediante búsqueda binaria."""
+    return bisect.bisect_right(starts, byte_offset)
 
 _C_LANGUAGE: Optional[Language] = None
 _PARSER: Optional[Parser] = None
+_VAR_QUERY: Optional[Query] = None
+
+
+def get_c_language() -> Language:
+    global _C_LANGUAGE
+    if _C_LANGUAGE is None:
+        _C_LANGUAGE = Language(tsc.language())
+    return _C_LANGUAGE
 
 
 def get_c_parser() -> Parser:
-    global _C_LANGUAGE, _PARSER
+    global _PARSER
     if _PARSER is None:
-        _C_LANGUAGE = Language(tsc.language())
-        _PARSER = Parser(_C_LANGUAGE)
+        _PARSER = Parser(get_c_language())
     return _PARSER
 
 
-def _find_identifier(node: Node) -> Optional[str]:
-    if node.type in ("identifier", "type_identifier", "field_identifier"):
-        return node.text.decode("utf-8", errors="replace")
-    for child in node.children:
-        res = _find_identifier(child)
-        if res:
-            return res
-    return None
+def get_var_query() -> Query:
+    global _VAR_QUERY
+    if _VAR_QUERY is None:
+        _VAR_QUERY = Query(
+            get_c_language(),
+            """
+            (parameter_declaration
+              declarator: [
+                (identifier) @param
+                (pointer_declarator (identifier) @param)
+                (pointer_declarator (pointer_declarator (identifier) @param))
+                (pointer_declarator (pointer_declarator (pointer_declarator (identifier) @param)))
+                (array_declarator (identifier) @param)
+                (array_declarator (array_declarator (identifier) @param))
+                (function_declarator declarator: (parenthesized_declarator (pointer_declarator (identifier) @param)))
+                (function_declarator declarator: (parenthesized_declarator (pointer_declarator (pointer_declarator (identifier) @param))))
+              ])
+
+            (declaration
+              declarator: [
+                (identifier) @var
+                (pointer_declarator (identifier) @var)
+                (pointer_declarator (pointer_declarator (identifier) @var))
+                (pointer_declarator (pointer_declarator (pointer_declarator (identifier) @var)))
+                (array_declarator (identifier) @var)
+                (array_declarator (array_declarator (identifier) @var))
+              ])
+
+            (init_declarator
+              declarator: [
+                (identifier) @var
+                (pointer_declarator (identifier) @var)
+                (pointer_declarator (pointer_declarator (identifier) @var))
+                (pointer_declarator (pointer_declarator (pointer_declarator (identifier) @var)))
+                (array_declarator (identifier) @var)
+                (array_declarator (array_declarator (identifier) @var))
+              ])
+
+            (for_statement
+              initializer: (declaration
+                declarator: [
+                  (identifier) @var
+                  (pointer_declarator (identifier) @var)
+                  (init_declarator declarator: (identifier) @var)
+                ]))
+            """,
+        )
+    return _VAR_QUERY
+
+
+def _run_query_captures(query: Query, root_node: Node) -> Dict[str, List[Node]]:
+    """Ejecuta una consulta AST abstrayendo diferencias entre versiones de tree-sitter."""
+    try:
+        if QueryCursor is not None:
+            raw = QueryCursor(query).captures(root_node)
+        else:
+            raw = query.captures(root_node)
+    except Exception:
+        return {}
+
+    if isinstance(raw, dict):
+        return raw
+    elif isinstance(raw, list):
+        res: Dict[str, List[Node]] = defaultdict(list)
+        for item in raw:
+            if isinstance(item, tuple) and len(item) == 2:
+                node, name = item
+                res[name].append(node)
+        return res
+    return {}
+
+
+def _find_identifier(node: Optional[Node]) -> Optional[str]:
+    """Extrae el identificador de un declarador de forma iterativa y segura."""
+    if node is None:
+        return None
+    try:
+        stack = [node]
+        while stack:
+            curr = stack.pop()
+            if curr.type in ("identifier", "type_identifier", "field_identifier"):
+                return curr.text.decode("utf-8", errors="replace")
+            if curr.type == "function_declarator":
+                continue
+            for child in reversed(curr.children):
+                stack.append(child)
+        return None
+    except Exception:
+        return None
 
 
 def check_regla_0x0001(content: str) -> List[Tuple[str, int]]:
     """Regla 0x0001h: Extrae variables y argumentos para verificar nombres significativos usando Tree-Sitter AST."""
     variables_found: List[Tuple[str, int]] = []
-    source_bytes = content.encode("utf-8")
-    parser = get_c_parser()
-    tree = parser.parse(source_bytes)
+    try:
+        source_bytes = content.encode("utf-8")
+        line_starts = _get_line_starts(source_bytes)
+        parser = get_c_parser()
+        tree = parser.parse(source_bytes)
+        query = get_var_query()
+        captures = _run_query_captures(query, tree.root_node)
 
-    def _traverse(node: Node) -> None:
-        if node.type == "parameter_declaration":
-            decl = node.child_by_field_name("declarator")
-            if decl:
-                ident = _find_identifier(decl)
+        for cap_name in ("param", "var"):
+            for n in captures.get(cap_name, []):
+                start = n.start_byte
+                end = n.end_byte
+                ident = source_bytes[start:end].decode("utf-8", errors="replace")
                 if ident and ident.lower() != "void":
-                    line_num = node.start_point.row + 1
-                    variables_found.append((ident, line_num))
+                    variables_found.append((ident, _byte_to_line(line_starts, start)))
+    except Exception:
+        pass
 
-        elif node.type == "declaration":
-            # Verificar si es declaración de variable y no de función
-            decl = node.child_by_field_name("declarator")
-            if decl and decl.type != "function_declarator":
-                ident = _find_identifier(decl)
-                if ident:
-                    line_num = node.start_point.row + 1
-                    variables_found.append((ident, line_num))
-            elif not decl:
-                for child in node.children:
-                    if child.type in ("init_declarator", "pointer_declarator", "array_declarator"):
-                        ident = _find_identifier(child)
-                        if ident:
-                            line_num = node.start_point.row + 1
-                            variables_found.append((ident, line_num))
-
-        elif node.type == "for_statement":
-            init_node = node.child_by_field_name("initializer")
-            if init_node:
-                for child in init_node.children:
-                    if child.type in ("declaration", "init_declarator"):
-                        ident = _find_identifier(child)
-                        if ident:
-                            line_num = node.start_point.row + 1
-                            variables_found.append((ident, line_num))
-
-        for child in node.children:
-            _traverse(child)
-
-    _traverse(tree.root_node)
     return sorted(list(set(variables_found)), key=lambda x: x[1])
+
+
+_RE_VAR_MULTIPLE = re.compile(r'\w+\s+\w+\s*,\s*\w+')
+_RE_FOR_START = re.compile(r'^\s*for\s*\(')
+_RE_OPERATORS = re.compile(r'[^\s](\+|-|\*|/|%|==|!=|<=|>=|<|>|&&|\|\||&|\||\^|<<|>>|=)[^\s=]')
+_RE_INC_DEC = re.compile(r'(\+\+|--)')
+_RE_CONTROL_STRUCT = re.compile(r'^\s*\b(if|for|while|switch)\s*\(.*\)')
+_RE_GOTO = re.compile(r'\bgoto\b')
+_RE_FUNC_DEF = re.compile(r'\w+\s+([a-zA-Z_]\w*)\s*\([^)]*\)\s*\{')
+_RE_SNAKE_CASE = re.compile(r'[a-z_][a-z0-9_]*')
+_RE_PTR_SPACING = re.compile(r'\w+\s*\*\s+[a-zA-Z_]')
+_RE_GETS = re.compile(r'\bgets\s*\(')
+
+_GLOBAL_VAR_QUERY: Optional[Query] = None
+
+
+def get_global_var_query() -> Query:
+    global _GLOBAL_VAR_QUERY
+    if _GLOBAL_VAR_QUERY is None:
+        _GLOBAL_VAR_QUERY = Query(
+            get_c_language(),
+            """
+            (translation_unit
+              (declaration
+                type: (_) @type
+                declarator: [
+                  (identifier) @global_var
+                  (pointer_declarator (identifier) @global_var)
+                  (pointer_declarator (pointer_declarator (identifier) @global_var))
+                  (array_declarator (identifier) @global_var)
+                  (init_declarator declarator: (identifier) @global_var)
+                  (init_declarator declarator: (pointer_declarator (identifier) @global_var))
+                  (init_declarator declarator: (array_declarator (identifier) @global_var))
+                ]))
+            """,
+        )
+    return _GLOBAL_VAR_QUERY
 
 
 def check_regla_0x0002(line: str, line_num: int) -> List[Dict[str, Any]]:
     """Regla 0x0002h: Una declaración de variable por línea."""
-    if re.match(r'\s*for\s*\(', line):
+    if _RE_FOR_START.match(line):
         return []
-    if re.search(r'\w+\s+\w+\s*,\s*\w+', line):
+    if _RE_VAR_MULTIPLE.search(line):
         return [{
             "rule_id": "0x0002h",
             "line": line_num,
@@ -104,9 +224,8 @@ def check_regla_0x0002(line: str, line_num: int) -> List[Dict[str, Any]]:
 
 def check_regla_0x0004(line: str, line_num: int) -> List[Dict[str, Any]]:
     """Regla 0x0004h: Espacio antes y después de cada operador."""
-    operators = r'(\+|-|\*|/|%|==|!=|<=|>=|<|>|&&|\|\||&|\||\^|<<|>>|=)'
-    if re.search(r'[^\s]' + operators + r'[^\s=]', line):
-        if not re.search(r'(\+\+|--)', line):
+    if _RE_OPERATORS.search(line):
+        if not _RE_INC_DEC.search(line):
             return [{
                 "rule_id": "0x0004h",
                 "line": line_num,
@@ -119,9 +238,8 @@ def check_regla_0x0004(line: str, line_num: int) -> List[Dict[str, Any]]:
 
 def check_regla_0x0005(line: str, line_num: int, lines: List[str]) -> List[Dict[str, Any]]:
     """Regla 0x0005h: Llaves de apertura en línea nueva."""
-    control_struct_pattern = re.compile(r'^\s*\b(if|for|while|switch)\s*\(.*\)')
     line_strip = line.strip()
-    match = control_struct_pattern.match(line_strip)
+    match = _RE_CONTROL_STRUCT.match(line_strip)
     if match:
         estructura = match.group(1)
         if '{' in line_strip:
@@ -138,40 +256,42 @@ def check_regla_0x0005(line: str, line_num: int, lines: List[str]) -> List[Dict[
 def check_regla_0x000Bh(content: str) -> List[Dict[str, Any]]:
     """Regla 0x000Bh: Prohibidas las variables globales mutables fuera de funciones usando Tree-Sitter AST."""
     findings = []
-    source_bytes = content.encode("utf-8")
-    parser = get_c_parser()
-    tree = parser.parse(source_bytes)
+    try:
+        source_bytes = content.encode("utf-8")
+        line_starts = _get_line_starts(source_bytes)
+        parser = get_c_parser()
+        tree = parser.parse(source_bytes)
+        query = get_global_var_query()
+        captures = _run_query_captures(query, tree.root_node)
 
-    for node in tree.root_node.children:
-        if node.type == "declaration":
-            type_node = node.child_by_field_name("type")
-            type_text = type_node.text.decode("utf-8", errors="replace") if type_node else ""
-            raw_decl = node.text.decode("utf-8", errors="replace")
-
-            # Descartar funciones, typedefs y constantes
-            if "const " in raw_decl or raw_decl.startswith("typedef"):
-                continue
-
-            decl_node = node.child_by_field_name("declarator")
-            if decl_node and decl_node.type == "function_declarator":
-                continue
-
-            ident = _find_identifier(decl_node or node)
+        for n in captures.get("global_var", []):
+            parent = n.parent
+            while parent and parent.type != "declaration":
+                parent = parent.parent
+            if parent:
+                decl_text = source_bytes[parent.start_byte:parent.end_byte].decode("utf-8", errors="replace")
+                if "const " in decl_text or decl_text.startswith("typedef"):
+                    continue
+            start = n.start_byte
+            end = n.end_byte
+            ident = source_bytes[start:end].decode("utf-8", errors="replace")
             if ident:
                 findings.append({
                     "rule_id": "0x000Bh",
-                    "line": node.start_point.row + 1,
+                    "line": _byte_to_line(line_starts, start),
                     "severity": "ERROR",
                     "message": f"Variable global no permitida: '{ident}'.",
                     "suggestion": "Pasar la variable por parámetro o declararla localmente.",
                 })
+    except Exception:
+        pass
 
     return findings
 
 
 def check_regla_0x0014h(line: str, line_num: int) -> List[Dict[str, Any]]:
     """Regla 0x0014h: Sin instrucción goto."""
-    if re.search(r'\bgoto\b', line):
+    if _RE_GOTO.search(line):
         return [{
             "rule_id": "0x0014h",
             "line": line_num,
@@ -184,10 +304,10 @@ def check_regla_0x0014h(line: str, line_num: int) -> List[Dict[str, Any]]:
 
 def check_regla_0x0017h(line: str, line_num: int) -> List[Dict[str, Any]]:
     """Regla 0x0017h: Funciones en snake_case."""
-    match = re.match(r'\w+\s+([a-zA-Z_]\w*)\s*\([^)]*\)\s*{', line)
+    match = _RE_FUNC_DEF.match(line)
     if match:
         func_name = match.group(1)
-        if not re.fullmatch(r'[a-z_][a-z0-9_]*', func_name) and func_name != 'main':
+        if not _RE_SNAKE_CASE.fullmatch(func_name) and func_name != 'main':
             return [{
                 "rule_id": "0x0017h",
                 "line": line_num,
@@ -200,7 +320,7 @@ def check_regla_0x0017h(line: str, line_num: int) -> List[Dict[str, Any]]:
 
 def check_regla_0x0018h(line: str, line_num: int) -> List[Dict[str, Any]]:
     """Regla 0x0018h: Punteros con asterisco pegado al identificador."""
-    if re.search(r'\w+\s*\*\s+[a-zA-Z_]', line):
+    if _RE_PTR_SPACING.search(line):
         return [{
             "rule_id": "0x0018h",
             "line": line_num,
@@ -213,7 +333,7 @@ def check_regla_0x0018h(line: str, line_num: int) -> List[Dict[str, Any]]:
 
 def check_regla_0x001Ch(line: str, line_num: int) -> List[Dict[str, Any]]:
     """Regla 0x001Ch: Prohibido gets."""
-    if re.search(r'\bgets\s*\(', line):
+    if _RE_GETS.search(line):
         return [{
             "rule_id": "0x001Ch",
             "line": line_num,

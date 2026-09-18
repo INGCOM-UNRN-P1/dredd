@@ -120,3 +120,48 @@ int main(void) {
     ast_msgs = [f["message"] for f in ast_findings if f["rule_code"] in ("0x0001h", "GAFF011")]
     assert any("'id'" in m for m in ast_msgs)
 
+
+def test_check_regla_0x0001_complex_macros_and_function_pointers():
+    from dredd.core.ast_checker import check_regla_0x0001, _find_identifier
+
+    # Casos límite: función puntero como argumento, macros multilinea, void
+    code = """
+    #define DO_SOMETHING(x) do { int _local_macro = (x); } while(0)
+    static inline void setup(void (**prev_segv)(int), void (*callback)(void *ctx)) {
+        int a = 1;
+        int *b = &a;
+        char arr[10];
+    }
+    """
+    vars_found = check_regla_0x0001(code)
+    var_names = [name for name, _ in vars_found]
+    assert "a" in var_names
+    assert "b" in var_names
+    assert "arr" in var_names
+    assert "prev_segv" in var_names
+    assert "callback" in var_names
+    assert "void" not in var_names
+
+    # _find_identifier con None
+    assert _find_identifier(None) is None
+
+
+def test_audit_style_excludes_p1_test_framework(tmp_path: Path):
+    from dredd.core.ripley_client import audit_style_with_gaff
+
+    # Archivo del alumno
+    student_c = tmp_path / "main.c"
+    student_c.write_text("int main(void) { int id = 1; return id; }\n", encoding="utf-8")
+
+    # Archivo de framework de test provisto por cátedra
+    test_dir = tmp_path / "libs" / "p1_test"
+    test_dir.mkdir(parents=True)
+    p1_h = test_dir / "p1_test.h"
+    p1_h.write_text("int p = 1;\n", encoding="utf-8")
+
+    findings, _ = audit_style_with_gaff(tmp_path)
+    files_audited = {f["file"] for f in findings}
+    assert "main.c" in files_audited
+    assert "p1_test.h" not in files_audited
+
+
