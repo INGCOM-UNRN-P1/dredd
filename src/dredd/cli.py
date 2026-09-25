@@ -2,6 +2,7 @@ import faulthandler
 import os
 from pathlib import Path
 import sys
+import json
 from typing import Any, Dict, List, Optional
 import typer
 from rich.console import Console
@@ -23,6 +24,7 @@ from dredd.core.reporter import find_student_report, generate_student_report, re
 from dredd.core.ripley_client import run_ripley_analysis
 
 app = typer.Typer(
+    context_settings={"help_option_names": ["-h", "--help"]},
     name="dredd",
     help="Orquestador docente de evaluación masiva y gestión de entregas (GitHub Classroom + Moodle).",
     no_args_is_help=True,
@@ -1287,9 +1289,17 @@ def cmd_config_preset(
 
 
 @app.command("doctor")
-def cmd_doctor() -> None:
+def cmd_doctor(
+    json_output: bool = typer.Option(False, "--json", help="Emitir el diagnóstico como JSON (schema_version 1.0.0)."),
+) -> None:
     """Verifica dependencias externas del sistema (GCC, Valgrind, Bubblewrap, Git, Ripley)."""
-    from dredd.core.doctor import ejecutar_diagnostico_doctor
+    from dredd.core.doctor import diagnosticar, ejecutar_diagnostico_doctor, informe_json
+    if json_output:
+        informe = informe_json(diagnosticar())
+        print(json.dumps(informe, ensure_ascii=False, indent=2))
+        if not informe["ok"]:
+            raise typer.Exit(code=1)
+        return
     ok = ejecutar_diagnostico_doctor(console=console)
     if not ok:
         raise typer.Exit(code=1)
