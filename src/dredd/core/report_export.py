@@ -17,8 +17,23 @@ class Block:
     rows: List[List[str]] = field(default_factory=list)
 
 
-_HEADING = re.compile(r"^(#{1,3})\s+(.*)$")
+_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 _TABLE_ROW = re.compile(r"^\s*\|(.+)\|\s*$")
+_LIST_ITEM = re.compile(r"^\s*[-*]\s+")
+
+
+def _inicia_bloque(linea: str) -> bool:
+    """True si la línea abre un bloque distinto de un párrafo (fence, encabezado, tabla, lista).
+
+    Usa los mismos patrones que parse_markdown: una línea que solo *empieza*
+    con `#` o `|` (p. ej. `#include <stdio.h>` o `| sin cierre`) es texto.
+    """
+    return (
+        linea.startswith("```")
+        or bool(_HEADING.match(linea))
+        or bool(_TABLE_ROW.match(linea))
+        or bool(_LIST_ITEM.match(linea))
+    )
 
 
 def _strip_inline(text: str) -> str:
@@ -68,16 +83,20 @@ def parse_markdown(md_text: str) -> List[Block]:
                 blocks.append(Block(kind="table", rows=rows))
             continue
 
-        if re.match(r"^\s*[-*]\s+", line):
+        if _LIST_ITEM.match(line):
             items: List[str] = []
-            while i < len(lines) and re.match(r"^\s*[-*]\s+", lines[i]):
-                items.append(_strip_inline(re.sub(r"^\s*[-*]\s+", "", lines[i]).strip()))
+            while i < len(lines) and _LIST_ITEM.match(lines[i]):
+                items.append(_strip_inline(_LIST_ITEM.sub("", lines[i]).strip()))
                 i += 1
             blocks.append(Block(kind="li", items=items))
             continue
 
-        para: List[str] = []
-        while i < len(lines) and lines[i].strip() and not lines[i].startswith(("#", "```", "|", "- ", "* ")):
+        # Párrafo: consume siempre la línea actual (si no, una línea que empieza
+        # con `#` o `|` sin ser encabezado ni tabla dejaba el índice quieto y el
+        # bucle no terminaba nunca) y sigue hasta una línea vacía o un bloque.
+        para: List[str] = [_strip_inline(line.strip())]
+        i += 1
+        while i < len(lines) and lines[i].strip() and not _inicia_bloque(lines[i].rstrip()):
             para.append(_strip_inline(lines[i].strip()))
             i += 1
         blocks.append(Block(kind="p", text=" ".join(para)))
@@ -137,7 +156,7 @@ def render_html_report(blocks: Sequence[Block], title: str = "Informe de Evaluac
 
     for b in blocks:
         if b.kind == "h":
-            tag = f"h{min(b.level + 0, 3)}" if b.level >= 1 else "h3"
+            tag = f"h{min(b.level, 6)}" if b.level >= 1 else "h3"
             body.append(f"<{tag}>{inline(b.text)}</{tag}>")
         elif b.kind == "p":
             body.append(f"<p>{inline(b.text)}</p>")

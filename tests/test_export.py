@@ -84,3 +84,70 @@ int main() { return 0; }
     assert pdf_out.exists()
     pdf_bytes = pdf_out.read_bytes()
     assert pdf_bytes.startswith(b"%PDF-1.4")
+
+
+# ── N-DREDD-01: el parser no debe colgarse con líneas que solo empiezan con `#` o `|` ──
+
+import multiprocessing
+import resource
+
+import pytest
+
+
+def _parsea_en_hijo(md: str) -> None:
+    # Un bucle infinito que acumula bloques agotaría la memoria del host:
+    # el hijo la tiene acotada y el padre lo mata si no termina a tiempo.
+    resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
+    parse_markdown(md)
+
+
+def _termina(md: str, segundos: float = 5.0) -> bool:
+    hijo = multiprocessing.get_context("fork").Process(target=_parsea_en_hijo, args=(md,))
+    hijo.start()
+    hijo.join(segundos)
+    if hijo.is_alive():
+        hijo.kill()
+        hijo.join()
+        return False
+    return hijo.exitcode == 0
+
+
+@pytest.mark.parametrize(
+    "md",
+    [
+        "# Informe\n\n#### Detalle\n\ntexto\n",
+        "#include <stdio.h>\nint main(void) { return 0; }\n",
+        "texto\n#hashtag sin espacio\nmás texto\n",
+        "| tabla sin cierre\n| otra fila\n",
+        "*énfasis* al comienzo\n",
+        "-sin espacio tras el guion\n",
+    ],
+)
+def test_parse_markdown_siempre_termina(md: str):
+    assert _termina(md), "parse_markdown no terminó (bucle infinito o sin memoria)"
+    assert parse_markdown(md)
+
+
+def test_parse_markdown_encabezados_h4_a_h6():
+    md = "#### Cuatro\n\n##### Cinco\n\n###### Seis\n"
+    assert _termina(md)
+    bloques = parse_markdown(md)
+    assert [(b.kind, b.level, b.text) for b in bloques] == [("h", 4, "Cuatro"), ("h", 5, "Cinco"), ("h", 6, "Seis")]
+    assert "<h4>Cuatro</h4>" in render_html_report(bloques)
+
+
+def test_parse_markdown_include_es_texto_del_parrafo():
+    md = "Encabezado del programa:\n#include <stdio.h>\n"
+    assert _termina(md)
+    bloques = parse_markdown(md)
+    assert len(bloques) == 1
+    assert bloques[0].kind == "p"
+    assert "#include <stdio.h>" in bloques[0].text
+
+
+def test_export_report_de_un_fuente_c_no_se_cuelga(tmp_path: Path):
+    fuente = tmp_path / "lista.c"
+    fuente.write_text("#include <stdio.h>\n#include \"lista.h\"\n\nint main(void)\n{\n    return 0;\n}\n")
+    assert _termina(fuente.read_text())
+    salida = export_report(fuente, fmt="html", out_path=tmp_path / "lista.html")
+    assert Path(salida).exists()
