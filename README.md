@@ -18,7 +18,10 @@ Orquestador docente de evaluación masiva, autograding multicanal y gestión de 
 
 ### Qué no cubre (Límites y Delegación)
 - Compilación directa y traducción pedagógica de errores (delega prioritariamente en `daedalus` y `esper`, con fallback a GCC).
-- Ejecución aislada de binarios (delega en `nostromo` y Bubblewrap, con fallback por cuotas `setrlimit`).
+- Ejecución aislada de binarios: delega en `nostromo` o usa Bubblewrap propio, montando solo los
+  directorios del sistema, el ejecutable y el workspace de la entrega (nunca el resto del disco).
+  Si no hay ningún sandbox disponible la entrega **no se ejecuta**; para correrla solo con cuotas
+  `setrlimit` y sin aislamiento de archivos hay que exportar `DREDD_PERMITIR_SIN_SANDBOX=1`.
 - Linter de reglas de cátedra y estilo (delega en `gaff` y `ripley`, con fallback a linter nativo Tree-Sitter AST).
 - Creación y multiplexación de guías de ejercicios (delega en `deckard`).
 

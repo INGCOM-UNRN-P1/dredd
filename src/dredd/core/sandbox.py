@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import os
 import re
 import resource
 import shutil
@@ -193,6 +194,171 @@ def _try_import_nostromo():
         return None
 
 
+# ── Construcción del sandbox bubblewrap ──────────────────────────────────────
+#
+# Dentro del sandbox solo se ve lo imprescindible para ejecutar un binario C:
+# los directorios del sistema (solo lectura), el directorio del ejecutable
+# (solo lectura) y el workspace de la entrega (lectura y escritura). Nunca se
+# monta `/` completo: eso exponía a la entrega el HOME del docente (soluciones
+# canónicas, entregas de otros estudiantes, claves).
+
+_DIRECTORIOS_DEL_SISTEMA = ("/usr", "/lib", "/lib64", "/bin", "/sbin")
+
+# Ejecutar la entrega sin ningún aislamiento de sistema de archivos solo se
+# permite si quien corre dredd lo autoriza explícitamente.
+ENV_PERMITIR_SIN_SANDBOX = "DREDD_PERMITIR_SIN_SANDBOX"
+
+MENSAJE_SIN_SANDBOX = (
+    "No se ejecutó la entrega: no hay un sandbox disponible (bubblewrap no está "
+    "instalado o no funciona en este sistema, y nostromo no está instalado). "
+    "Instalá bubblewrap (`sudo apt install bubblewrap` / `sudo dnf install bubblewrap`) "
+    f"o, bajo tu responsabilidad, exportá {ENV_PERMITIR_SIN_SANDBOX}=1 para ejecutar "
+    "sin aislamiento (el código del estudiante tendrá acceso a tus archivos)."
+)
+
+_FLAGS_AISLAMIENTO_CACHE: Optional[List[str]] = None
+
+
+def _binds_del_sistema(existe=os.path.exists) -> List[str]:
+    """`--ro-bind` de cada directorio del sistema que existe (bwrap aborta si falta el origen)."""
+    args: List[str] = []
+    for directorio in _DIRECTORIOS_DEL_SISTEMA:
+        if existe(directorio):
+            args += ["--ro-bind", directorio, directorio]
+    return args
+
+
+def _flags_aislamiento(bwrap_bin: str, requerir_red_aislada: bool) -> Optional[List[str]]:
+    """Banderas de namespaces que funcionan en este host, o None si ninguna sirve.
+
+    `--unshare-all` también aísla la red; en contenedores sin CAP_NET_ADMIN falla
+    al configurar loopback. En ese caso, si no se exige red aislada, se aíslan
+    user/IPC/PID/UTS sin tocar la red (mismo criterio que nostromo).
+    """
+    global _FLAGS_AISLAMIENTO_CACHE
+    if _FLAGS_AISLAMIENTO_CACHE is None:
+        candidatos = [
+            ["--unshare-all"],
+            ["--unshare-user", "--unshare-ipc", "--unshare-pid", "--unshare-uts", "--unshare-cgroup-try"],
+        ]
+        _FLAGS_AISLAMIENTO_CACHE = []
+        for flags in candidatos:
+            try:
+                res = subprocess.run(
+                    [bwrap_bin, *flags, *_binds_del_sistema(), "--proc", "/proc", "--dev", "/dev", "true"],
+                    capture_output=True,
+                    timeout=5.0,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if res.returncode == 0:
+                _FLAGS_AISLAMIENTO_CACHE = flags
+                break
+    if not _FLAGS_AISLAMIENTO_CACHE:
+        return None
+    if requerir_red_aislada and "--unshare-all" not in _FLAGS_AISLAMIENTO_CACHE:
+        return None
+    return list(_FLAGS_AISLAMIENTO_CACHE)
+
+
+def _comando_bwrap(
+    bwrap_bin: str,
+    cmd: List[str],
+    cwd_dir: Optional[str],
+    flags: List[str],
+    extra: Optional[List[str]] = None,
+) -> List[str]:
+    """Arma el comando bwrap con montajes mínimos para ejecutar `cmd`.
+
+    El orden importa: `--tmpfs /tmp` va antes de montar el ejecutable y el
+    workspace para no ocultarlos cuando viven bajo /tmp.
+    """
+    args = [bwrap_bin, *flags, *_binds_del_sistema(), "--tmpfs", "/tmp", "--dev", "/dev", "--proc", "/proc"]
+    args += list(extra or [])
+    # Un nombre sin separador (p. ej. "echo") se busca en el PATH dentro del
+    # sandbox; una ruta relativa se interpreta desde el workspace.
+    ejecutable = Path(cmd[0]) if cmd and os.sep in cmd[0] else None
+    if ejecutable is not None and not ejecutable.is_absolute() and cwd_dir:
+        ejecutable = Path(cwd_dir) / ejecutable
+    if ejecutable is not None and ejecutable.is_file():
+        directorio = str(ejecutable.resolve().parent)
+        if not (cwd_dir and (directorio == cwd_dir or directorio.startswith(cwd_dir + os.sep))):
+            args += ["--ro-bind", directorio, directorio]
+        cmd = [str(ejecutable.resolve())] + list(cmd[1:])
+    if cwd_dir:
+        args += ["--bind", cwd_dir, cwd_dir, "--chdir", cwd_dir]
+    return args + ["--die-with-parent", "--"] + list(cmd)
+
+
+def _decodificar(valor) -> str:
+    if isinstance(valor, bytes):
+        return valor.decode("utf-8", errors="replace")
+    return valor or ""
+
+
+def _ejecutar_con_bwrap(
+    full_cmd: List[str],
+    input_data: str,
+    timeout: float,
+    cwd_dir: Optional[str],
+    etiqueta_timeout: str,
+) -> Optional[Tuple[int, str, str, bool]]:
+    """Corre el comando ya envuelto en bwrap; devuelve None si bwrap no pudo armar el sandbox."""
+    try:
+        proc = subprocess.run(
+            full_cmd,
+            input=input_data,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd_dir,
+        )
+    except subprocess.TimeoutExpired as e:
+        return -1, sanitize_output(_decodificar(e.stdout)), sanitize_output(
+            f"[{etiqueta_timeout}] Proceso cancelado tras {timeout}s: {_decodificar(e.stderr)}"
+        ), True
+    except OSError:
+        return None
+    if proc.returncode != 0 and proc.stderr.startswith("bwrap:"):
+        return None
+    return proc.returncode, sanitize_output(proc.stdout), sanitize_output(proc.stderr), False
+
+
+def _sin_sandbox_permitido() -> bool:
+    return os.environ.get(ENV_PERMITIR_SIN_SANDBOX, "").strip().lower() in ("1", "true", "si", "sí", "yes")
+
+
+def _ejecutar_sin_aislamiento(
+    cmd: List[str],
+    input_data: str,
+    timeout: float,
+    cwd_dir: Optional[str],
+    limites,
+    etiqueta_timeout: str,
+) -> Tuple[int, str, str, bool]:
+    """Solo con autorización explícita: límites de recursos, sin aislamiento de archivos."""
+    if not _sin_sandbox_permitido():
+        return -1, "", MENSAJE_SIN_SANDBOX, False
+    try:
+        proc = subprocess.run(
+            cmd,
+            input=input_data,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd_dir,
+            preexec_fn=limites,
+        )
+        return proc.returncode, sanitize_output(proc.stdout), sanitize_output(proc.stderr), False
+    except subprocess.TimeoutExpired as e:
+        return -1, sanitize_output(_decodificar(e.stdout)), sanitize_output(
+            f"[{etiqueta_timeout}] Proceso cancelado tras {timeout}s: {_decodificar(e.stderr)}"
+        ), True
+    except Exception as e:
+        return -1, "", f"Error de ejecución en sandbox: {e}", False
+
+
 def execute_sandboxed(
     cmd: List[str],
     input_data: str = "",
@@ -200,8 +366,11 @@ def execute_sandboxed(
     max_memory_mb: int = 64,
     workspace: Optional[Path] = None,
 ) -> Tuple[int, str, str, bool]:
-    """Ejecuta un binario C en sandbox delegando en nostromo (con fallback bwrap/setrlimit).
-    
+    """Ejecuta un binario C en sandbox delegando en nostromo, o con bubblewrap propio.
+
+    Sin nostromo ni bubblewrap funcional la entrega no se ejecuta, salvo que se
+    exporte DREDD_PERMITIR_SIN_SANDBOX=1 (entonces corre solo con setrlimit).
+
     Devuelve (returncode, stdout, stderr, timeout_or_killed).
     """
     nostromo_fn = _try_import_nostromo()
@@ -221,56 +390,23 @@ def execute_sandboxed(
     bwrap_bin = shutil.which("bwrap")
     cwd_dir = str(workspace.resolve()) if workspace and workspace.is_dir() else None
 
-    # Si bubblewrap está disponible, intentar aislar namespaces
-    if bwrap_bin:
-        bwrap_cmd = [
-            bwrap_bin,
-            "--unshare-all",
-            "--ro-bind", "/", "/",
-            "--tmpfs", "/tmp",
-            "--dev", "/dev",
-            "--proc", "/proc",
-        ]
-        if cwd_dir:
-            bwrap_cmd.extend(["--bind", cwd_dir, cwd_dir, "--chdir", cwd_dir])
-        full_cmd = bwrap_cmd + ["--"] + cmd
-
-        try:
-            proc = subprocess.run(
-                full_cmd,
-                input=input_data,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=cwd_dir,
+    if bwrap_bin and cmd:
+        flags = _flags_aislamiento(bwrap_bin, requerir_red_aislada=False)
+        if flags is not None:
+            resultado = _ejecutar_con_bwrap(
+                _comando_bwrap(bwrap_bin, cmd, cwd_dir, flags), input_data, timeout, cwd_dir, "TIMEOUT"
             )
-            if proc.returncode == 0 or "bwrap:" not in proc.stderr:
-                return proc.returncode, sanitize_output(proc.stdout), sanitize_output(proc.stderr), False
-        except subprocess.TimeoutExpired as e:
-            stdout_txt = e.stdout.decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
-            stderr_txt = e.stderr.decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
-            return -1, sanitize_output(stdout_txt), sanitize_output(f"[TIMEOUT] Proceso cancelado tras {timeout}s: {stderr_txt}"), True
-        except Exception:
-            pass
+            if resultado is not None:
+                return resultado
 
-    # Fallback seguro con setrlimit directo
-    try:
-        proc = subprocess.run(
-            cmd,
-            input=input_data,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=cwd_dir,
-            preexec_fn=lambda: _set_resource_limits(max_memory_mb=max_memory_mb, max_cpu_seconds=int(timeout) + 1),
-        )
-        return proc.returncode, sanitize_output(proc.stdout), sanitize_output(proc.stderr), False
-    except subprocess.TimeoutExpired as e:
-        stdout_txt = e.stdout.decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
-        stderr_txt = e.stderr.decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
-        return -1, sanitize_output(stdout_txt), sanitize_output(f"[TIMEOUT / MEMORY EXCEEDED] Proceso cancelado tras {timeout}s: {stderr_txt}"), True
-    except Exception as e:
-        return -1, "", f"Error de ejecución en sandbox: {e}", False
+    return _ejecutar_sin_aislamiento(
+        cmd,
+        input_data,
+        timeout,
+        cwd_dir,
+        lambda: _set_resource_limits(max_memory_mb=max_memory_mb, max_cpu_seconds=int(timeout) + 1),
+        "TIMEOUT / MEMORY EXCEEDED",
+    )
 
 
 def _set_shielded_resource_limits(max_memory_mb: int = 48, max_cpu_seconds: int = 3, max_nofile: int = 16) -> None:
@@ -296,65 +432,28 @@ def execute_shielded_sandbox(
     max_memory_mb: int = 48,
     workspace: Optional[Path] = None,
 ) -> Tuple[int, str, str, bool]:
-    """Modo 'Sandbox Blindado': ejecución con aislamiento estricto de red, namespaces y cuotas de memoria/swap."""
+    """Modo 'Sandbox Blindado': namespaces completos (incluida la red), /tmp y /dev/shm propios.
+
+    A diferencia de `execute_sandboxed`, exige red aislada: si el host no permite
+    `--unshare-all`, no degrada a un aislamiento menor. Sin sandbox la entrega
+    no se ejecuta, salvo DREDD_PERMITIR_SIN_SANDBOX=1.
+    """
     bwrap_bin = shutil.which("bwrap")
     cwd_dir = str(workspace.resolve()) if workspace and workspace.is_dir() else None
 
-    if bwrap_bin:
-        # Modo blindado estricto con bwrap
-        bwrap_cmd = [
-            bwrap_bin,
-            "--unshare-all",
-            "--unshare-net",           # Corte total de red
-            "--unshare-ipc",           # Sin IPC compartido
-            "--unshare-pid",           # Namespace PID propio
-            "--ro-bind", "/", "/",
-            "--tmpfs", "/tmp",
-            "--tmpfs", "/dev/shm",     # Swap/memoria compartida aislada
-            "--dev", "/dev",
-            "--proc", "/proc",
-            "--die-with-parent",
-        ]
-        if cwd_dir:
-            bwrap_cmd.extend(["--bind", cwd_dir, cwd_dir, "--chdir", cwd_dir])
-        full_cmd = bwrap_cmd + ["--"] + cmd
+    if bwrap_bin and cmd:
+        flags = _flags_aislamiento(bwrap_bin, requerir_red_aislada=True)
+        if flags is not None:
+            full_cmd = _comando_bwrap(bwrap_bin, cmd, cwd_dir, flags, extra=["--tmpfs", "/dev/shm"])
+            resultado = _ejecutar_con_bwrap(full_cmd, input_data, timeout, cwd_dir, "TIMEOUT BLINDADO")
+            if resultado is not None:
+                return resultado
 
-        try:
-            proc = subprocess.run(
-                full_cmd,
-                input=input_data,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=cwd_dir,
-            )
-            if proc.returncode == 0 or "bwrap:" not in proc.stderr:
-                return proc.returncode, sanitize_output(proc.stdout), sanitize_output(proc.stderr), False
-        except subprocess.TimeoutExpired as e:
-            stdout_txt = e.stdout.decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
-            stderr_txt = e.stderr.decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
-            return -1, sanitize_output(stdout_txt), sanitize_output(f"[TIMEOUT BLINDADO] Proceso abortado tras {timeout}s: {stderr_txt}"), True
-        except Exception:
-            pass
-
-    # Fallback con límites reforzados por setrlimit
-    try:
-        proc = subprocess.run(
-            cmd,
-            input=input_data,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=cwd_dir,
-            preexec_fn=lambda: _set_shielded_resource_limits(
-                max_memory_mb=max_memory_mb,
-                max_cpu_seconds=int(timeout) + 1,
-            ),
-        )
-        return proc.returncode, sanitize_output(proc.stdout), sanitize_output(proc.stderr), False
-    except subprocess.TimeoutExpired as e:
-        stdout_txt = e.stdout.decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
-        stderr_txt = e.stderr.decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
-        return -1, sanitize_output(stdout_txt), sanitize_output(f"[TIMEOUT / CGROUP OVERFLOW] Abortado por cuota de recursos: {stderr_txt}"), True
-    except Exception as e:
-        return -1, "", f"Error en sandbox blindado: {e}", False
+    return _ejecutar_sin_aislamiento(
+        cmd,
+        input_data,
+        timeout,
+        cwd_dir,
+        lambda: _set_shielded_resource_limits(max_memory_mb=max_memory_mb, max_cpu_seconds=int(timeout) + 1),
+        "TIMEOUT / CGROUP OVERFLOW",
+    )

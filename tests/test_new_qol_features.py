@@ -12,7 +12,11 @@ from dredd.core.plagiarism import SimilarityMatch, generate_plagiarism_html_repo
 runner = CliRunner()
 
 
-def test_sandbox_execution_clean(tmp_path: Path):
+def test_sandbox_execution_clean(tmp_path: Path, monkeypatch):
+    # Prueba la ejecución y captura de salida, no el aislamiento (ver
+    # test_sandbox_aislamiento.py): se autoriza correr sin sandbox en hosts
+    # sin bubblewrap ni nostromo, como los runners de CI.
+    monkeypatch.setenv("DREDD_PERMITIR_SIN_SANDBOX", "1")
     c_code = tmp_path / "hello.c"
     c_code.write_text('#include <stdio.h>\nint main(void) { printf("Hola Sandbox\\n"); return 0; }\n')
     bin_file = tmp_path / "hello_bin"

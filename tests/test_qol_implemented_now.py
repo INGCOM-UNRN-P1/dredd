@@ -213,7 +213,10 @@ int main(void) {
     assert "Resultados de Pruebas Adversarias" in res_cli.stdout
 
 
-def test_execute_shielded_sandbox():
+def test_execute_shielded_sandbox(monkeypatch):
+    # Ejecución y captura de salida; el aislamiento se prueba en
+    # test_sandbox_aislamiento.py. Sin bubblewrap (CI) se autoriza correr sin sandbox.
+    monkeypatch.setenv("DREDD_PERMITIR_SIN_SANDBOX", "1")
     retcode, out, err, timed_out = execute_shielded_sandbox(["echo", "blindado"], timeout=2.0)
     assert retcode == 0
     assert "blindado" in out
