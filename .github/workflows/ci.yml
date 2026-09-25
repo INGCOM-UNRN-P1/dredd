@@ -26,10 +26,7 @@ jobs:
       - name: Sincronizar dependencias
         run: uv sync --all-extras
 
-      - name: Instalar dependencias del ecosistema
-        run: |
-          uv pip install "git+https://github.com/INGCOM-UNRN/deckard.git"
-
       - name: Ejecutar suite de pruebas
         run: uv run pytest -q
+
 
