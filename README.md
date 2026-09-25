@@ -47,7 +47,7 @@ Dredd está desarrollado en Python 3.11+ con `typer` y `rich`.
 ```bash
 # Instalación en modo desarrollo
 cd dredd
-uv sync --extra dev
+uv sync                      # incluye el grupo de desarrollo (pytest)
 
 # Ver catálogo de comandos
 uv run dredd --help

@@ -39,12 +39,6 @@ Homepage = "https://github.com/INGCOM-UNRN-P1/dredd"
 Repository = "https://github.com/INGCOM-UNRN-P1/dredd.git"
 Issues = "https://github.com/INGCOM-UNRN-P1/dredd/issues"
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-mock>=3.12.0",
-]
-
 [project.scripts]
 dredd = "dredd.cli:app"
 
@@ -58,3 +52,9 @@ packages = ["src/dredd"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-mock>=3.12.0",
+]
