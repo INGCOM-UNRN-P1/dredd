@@ -107,12 +107,16 @@ def test_servidor_http_endpoints_y_verbose():
 
 
 def test_cli_dashboard_help():
+    import re
     res1 = runner.invoke(app, ["serve-dashboard", "--help"])
     assert res1.exit_code == 0
-    assert "--port" in res1.stdout
-    assert "--verbose" in res1.stdout
-    assert "--entregas" in res1.stdout
+    clean1 = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", res1.stdout)
+    assert "--port" in clean1
+    assert "--verbose" in clean1
+    assert "--entregas" in clean1
 
     res2 = runner.invoke(app, ["dashboard", "--help"])
     assert res2.exit_code == 0
-    assert "--verbose" in res2.stdout
+    clean2 = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", res2.stdout)
+    assert "--verbose" in clean2
+

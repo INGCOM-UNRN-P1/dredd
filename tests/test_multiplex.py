@@ -27,7 +27,11 @@ def test_dredd_cli_multiplex(tmp_path):
         "-o", str(out_dir),
     ])
 
+    if res.exit_code != 0 and "Deckard no está disponible" in (res.stdout + res.stderr if hasattr(res, 'stderr') and res.stderr else res.stdout):
+        pytest.skip("Deckard no está disponible en el entorno")
+
     assert res.exit_code == 0
+
     assert "✓ Multiplexación completada para 'dredd_tp_lista'" in res.stdout
     assert "Total de variantes combinatorias: 2" in res.stdout
     assert (out_dir / "paquetes" / "dredd_tp_lista_v0.ripkg").is_file()
