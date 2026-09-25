@@ -2,7 +2,7 @@ import faulthandler
 import os
 from pathlib import Path
 import sys
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 import typer
 from rich.console import Console
 from rich.table import Table
