@@ -29,4 +29,23 @@ jobs:
       - name: Ejecutar suite de pruebas
         run: uv run pytest -q
 
+  calidad:
+    name: Errores de Python y dependencias vulnerables
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
 
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      # Solo reglas que indican errores reales: sintaxis (E9), comparaciones
+      # inválidas (F63), sentencias fuera de lugar (F7) y nombres indefinidos (F82).
+      - name: Errores de Python (ruff E9, F63, F7, F82)
+        run: uvx ruff check --select E9,F63,F7,F82 .
+
+      - name: Dependencias con vulnerabilidades conocidas (pip-audit)
+        run: |
+          uv export --format requirements-txt --no-hashes --no-emit-project --all-extras --all-groups > "$RUNNER_TEMP/requisitos.txt"
+          uvx pip-audit -r "$RUNNER_TEMP/requisitos.txt" --disable-pip --no-deps
