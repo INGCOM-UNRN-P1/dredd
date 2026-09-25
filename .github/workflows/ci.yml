@@ -28,7 +28,7 @@ jobs:
 
       - name: Instalar dependencias del ecosistema
         run: |
-          uv pip install "git+https://github.com/INGCOM-UNRN-P1/deckard.git"
+          uv pip install "git+https://github.com/INGCOM-UNRN/deckard.git"
 
       - name: Ejecutar suite de pruebas
         run: uv run pytest -q
