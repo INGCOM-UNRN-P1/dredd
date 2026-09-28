@@ -22,8 +22,10 @@ from dredd.core.moodle import export_grades_csv, unpack_moodle_zip
 from dredd.core.plagiarism import PlagiarismDetector
 from dredd.core.reporter import find_student_report, generate_student_report, resolve_submission_revision
 from dredd.core.ripley_client import run_ripley_analysis
+from dredd.errores import TyperConErrores
 
-app = typer.Typer(
+# La app raíz muestra los errores de datos como mensajes (N-ECO-05).
+app = TyperConErrores(
     context_settings={"help_option_names": ["-h", "--help"]},
     name="dredd",
     help="Orquestador docente de evaluación masiva y gestión de entregas (GitHub Classroom + Moodle).",
@@ -1559,8 +1561,15 @@ def cmd_late_penalty(
     def parse_dt(s: str) -> datetime:
         try:
             return datetime.fromisoformat(s)
-        except Exception:
+        except ValueError:
+            pass
+        try:
             return datetime.strptime(s, "%Y-%m-%d %H:%M")
+        except ValueError:
+            raise typer.BadParameter(
+                f"«{s}» no es una fecha válida: usá ISO 8601 o el formato AAAA-MM-DD HH:MM "
+                "(por ejemplo 2026-09-25 23:59)."
+            ) from None
 
     dt_entrega = parse_dt(fecha_entrega)
     dt_limite = parse_dt(fecha_limite)
