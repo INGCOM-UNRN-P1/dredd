@@ -7,17 +7,23 @@ import subprocess
 from typing import Dict, Any, List, Optional
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from dredd.core.ecosystem import resolve_sibling_cli
 
 
 def chequear_herramienta(comando: str, args_version: str = "--version") -> Dict[str, Any]:
-    """Verifica si un comando está disponible en $PATH o en el ecosistema hermano y obtiene su versión."""
+    """Verifica si un comando está disponible en $PATH o en el ecosistema hermano y obtiene su versión.
+
+    `falla` dice por qué, si el comando está pero `--version` termina con error (p. ej., una
+    instalación vieja que ya no importa): antes se tomaba la primera línea del traceback como la
+    versión y la herramienta figuraba «OK» (N-DREDD-06).
+    """
     path = resolve_sibling_cli(comando)
     if not path:
-        return {"disponible": False, "version": None, "ruta": None}
-    
+        return {"disponible": False, "version": None, "ruta": None, "falla": None}
+
     try:
         res = subprocess.run(
             [path, args_version],
@@ -25,12 +31,14 @@ def chequear_herramienta(comando: str, args_version: str = "--version") -> Dict[
             text=True,
             timeout=3,
         )
-        salida = (res.stdout or res.stderr).strip().splitlines()
-        version = salida[0] if salida else "Detectada"
-    except Exception:
-        version = "Detectada"
-        
-    return {"disponible": True, "version": version, "ruta": path}
+    except Exception:  # lenta o sin permisos: está, pero no se pudo preguntar la versión
+        return {"disponible": True, "version": "Detectada", "ruta": path, "falla": None}
+    if res.returncode != 0:
+        lineas = [linea.strip() for linea in (res.stderr or res.stdout).splitlines() if linea.strip()]
+        falla = lineas[-1] if lineas else f"código de salida {res.returncode}"
+        return {"disponible": True, "version": None, "ruta": path, "falla": falla}
+    salida = (res.stdout or res.stderr).strip().splitlines()
+    return {"disponible": True, "version": salida[0] if salida else "Detectada", "ruta": path, "falla": None}
 
 
 def chequear_capacidades_kernel() -> Dict[str, bool]:
@@ -72,13 +80,21 @@ def diagnosticar() -> List[Dict[str, Any]]:
     chequeos = []
     for cmd, desc, obligatorio, fix in HERRAMIENTAS:
         info = chequear_herramienta(cmd)
+        funciona = info["disponible"] and not info["falla"]
+        if funciona:
+            detalle = f"{info['version']} ({info['ruta']})"
+        elif info["disponible"]:
+            detalle = f"instalada, pero `{cmd} --version` falla: {info['falla']} ({info['ruta']})"
+        else:
+            detalle = "No encontrado en $PATH"
         chequeos.append({
             "nombre": cmd,
             "requerido": obligatorio,
-            "ok": info["disponible"],
-            "detalle": f"{info['version']} ({info['ruta']})" if info["disponible"] else "No encontrado en $PATH",
+            "ok": funciona,
+            "falla": bool(info["falla"]),
+            "detalle": detalle,
             "proposito": desc,
-            "sugerencia": "" if info["disponible"] else fix,
+            "sugerencia": "" if funciona else (f"Reinstalá: {fix}" if info["falla"] else fix),
         })
     capacidades = chequear_capacidades_kernel()
     chequeos.append({
@@ -125,13 +141,15 @@ def ejecutar_diagnostico_doctor(console: Optional[Console] = None) -> bool:
             detalles = chequeo["detalle"]
             accion = chequeo["proposito"]
         else:
+            problema = "Falla" if chequeo.get("falla") else "Faltante"
             if chequeo["requerido"]:
-                estado = "[bold red]✗ Faltante (Crítico)[/bold red]"
+                estado = f"[bold red]✗ {problema} (Crítico)[/bold red]"
                 todo_ok = False
             else:
-                estado = "[yellow]! Opcional[/yellow]"
-            detalles = "[dim]No encontrado en $PATH[/dim]"
-            accion = f"{chequeo['proposito']} ↳ Instalar: {chequeo['sugerencia']}"
+                estado = f"[yellow]! {problema} (opcional)[/yellow]" if chequeo.get("falla") else "[yellow]! Opcional[/yellow]"
+            detalles = f"[dim]{escape(chequeo['detalle'])}[/dim]"
+            prefijo = "" if chequeo.get("falla") else "Instalar: "  # la sugerencia de una falla ya dice «Reinstalá»
+            accion = f"{chequeo['proposito']} ↳ {prefijo}{escape(chequeo['sugerencia'])}"
         tabla.add_row(chequeo["nombre"], estado, detalles, accion)
 
     cons.print(tabla)

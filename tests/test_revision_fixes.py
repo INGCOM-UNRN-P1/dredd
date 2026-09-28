@@ -116,3 +116,32 @@ def test_eval_json_option(tmp_path: Path):
     assert "results" in data
     assert len(data["results"]) == 1
     assert data["results"][0]["student"] == "alvarez_juan"
+
+
+def test_doctor_marca_como_falla_una_herramienta_que_no_arranca(tmp_path, monkeypatch):
+    """N-DREDD-06: una instalación vieja cuyo `--version` termina en traceback figuraba «✓ OK» y con la
+    primera línea del traceback como versión."""
+    import os
+    from io import StringIO
+
+    from rich.console import Console
+
+    from dredd.core.doctor import diagnosticar
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    rota = bin_dir / "gaff"
+    rota.write_text("#!/bin/sh\necho 'Traceback (most recent call last):' >&2\n"
+                    "echo \"ModuleNotFoundError: No module named 'daedalus'\" >&2\nexit 1\n")
+    rota.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+    gaff = next(c for c in diagnosticar() if c["nombre"] == "gaff")
+    assert gaff["ok"] is False and gaff["falla"] is True
+    assert "No module named 'daedalus'" in gaff["detalle"] and "Traceback" not in gaff["detalle"]
+    assert gaff["sugerencia"].startswith("Reinstalá")
+
+    buf = StringIO()
+    ejecutar_diagnostico_doctor(console=Console(file=buf, color_system=None, width=250))
+    fila = next(linea for linea in buf.getvalue().splitlines() if "│ gaff" in linea)
+    assert "Falla" in fila and "✓ OK" not in fila
