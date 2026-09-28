@@ -180,18 +180,9 @@ def _set_resource_limits(max_memory_mb: int = 64, max_cpu_seconds: int = 5) -> N
 def _try_import_nostromo():
     try:
         from nostromo.core.sandbox import ejecutar_aislado
-        return ejecutar_aislado
     except ImportError:
-        import sys
-        sibling = Path(__file__).resolve().parents[3] / "nostromo" / "src"
-        if sibling.is_dir() and str(sibling) not in sys.path:
-            sys.path.insert(0, str(sibling))
-            try:
-                from nostromo.core.sandbox import ejecutar_aislado
-                return ejecutar_aislado
-            except ImportError:
-                return None
-        return None
+        return None  # sin el extra `ecosistema` se usa el camino propio
+    return ejecutar_aislado
 
 
 # ── Construcción del sandbox bubblewrap ──────────────────────────────────────

@@ -34,6 +34,21 @@ dependencies = [
     "tree-sitter-c>=0.23.0",
 ]
 
+[project.optional-dependencies]
+# Herramientas del ecosistema que se usan como biblioteca (N-ECO-01). Referencias git fijadas
+# a commits publicados; sin el extra se usa el camino propio (gcc, sin sandbox de nostromo…).
+ecosistema = [
+    "daedalus @ git+https://github.com/INGCOM-UNRN-P1/daedalus@cd3eb998193cd5bd9ea881aa9a0e19f5fe6d9a86",
+    "nostromo @ git+https://github.com/INGCOM-UNRN-P1/nostromo@803726033d31d6a1b5e64545bb6a15c6cbe21d0a",
+    "gaff @ git+https://github.com/INGCOM-UNRN-P1/gaff@64aa958f6b834e013c4d5254b75f0883e475b84f",
+    "spunkmeyer @ git+https://github.com/INGCOM-UNRN-P1/spunkmeyer@ec9cbd266f9d187c787f528997f1ae0c09dd8ff2",
+]
+
+# Multiplexado de trabajos prácticos con las guías de deckard.
+guias = [
+    "deckard @ git+https://github.com/INGCOM-UNRN/deckard@cf3c64ace2a9cfae1d758ceb674ca2bb4b0995af",
+]
+
 [project.urls]
 Homepage = "https://github.com/INGCOM-UNRN-P1/dredd"
 Repository = "https://github.com/INGCOM-UNRN-P1/dredd.git"
@@ -58,3 +73,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-mock>=3.12.0",
 ]
+
+[tool.hatch.metadata]
+# Las dependencias del ecosistema son referencias directas a git (nunca por nombre en PyPI).
+allow-direct-references = true

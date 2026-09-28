@@ -6,7 +6,6 @@ import importlib
 import logging
 from pathlib import Path
 import shutil
-import sys
 from typing import Any, Callable, Optional
 
 logger = logging.getLogger("dredd.ecosystem")
@@ -17,37 +16,19 @@ def resolve_sibling_tool(
     module_path: str,
     symbol_name: str,
 ) -> Optional[Callable[..., Any]]:
-    """Resuelve dinámicamente un símbolo o función de una herramienta hermana del ecosistema.
+    """Resuelve un símbolo de otra herramienta del ecosistema instalada en el mismo entorno.
 
-    Estrategia en orden:
-    1. Import directo del entorno Python activo (`importlib.import_module`).
-    2. Import local buscando en el monorepo hermano `../<tool_name>/src`.
-    3. Fallback a `None` con log descriptivo.
+    Las herramientas que dredd usa como biblioteca se declaran en los extras
+    `ecosistema` y `guias` de pyproject (referencias git fijadas); ya no se buscan
+    en carpetas hermanas del monorepo (N-ECO-01). Si no están instaladas, devuelve
+    None y el llamador usa su camino propio.
     """
-    # 1. Import directo si está instalado en el venv actual
     try:
         mod = importlib.import_module(module_path)
-        func = getattr(mod, symbol_name, None)
-        if func is not None:
-            return func
-    except ImportError:
-        pass
-
-    # 2. Búsqueda en monorepo hermano
-    try:
-        tools_root = Path(__file__).resolve().parents[3]
-        sibling_src = tools_root / tool_name / "src"
-        if sibling_src.is_dir() and str(sibling_src) not in sys.path:
-            sys.path.insert(0, str(sibling_src))
-
-        mod = importlib.import_module(module_path)
-        func = getattr(mod, symbol_name, None)
-        if func is not None:
-            return func
-    except Exception as e:
-        logger.debug(f"No se pudo importar '{symbol_name}' desde '{module_path}' ({tool_name}): {e}")
-
-    return None
+    except ImportError as e:
+        logger.debug(f"'{tool_name}' no está instalado en este entorno ({e}); se usa el camino propio.")
+        return None
+    return getattr(mod, symbol_name, None)
 
 
 def resolve_sibling_cli(tool_name: str) -> Optional[str]:
