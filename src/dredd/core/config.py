@@ -62,7 +62,7 @@ class ToolChecksConfig:
     enforce_variable_length: bool = True
 
     # Daedalus / Compilador
-    daedalus_compiler: str = "daedalus"  # "daedalus", "esper", "gcc", "clang"
+    daedalus_compiler: str = "daedalus"  # "daedalus", "gcc", "clang"
     compiler_flags: str = "-Wall -Wextra -std=c11"
     treat_warnings_as_errors: bool = False
 

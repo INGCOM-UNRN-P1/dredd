@@ -1,4 +1,4 @@
-"""Módulo de compilación C para Dredd usando ESPER con fallback a GCC."""
+"""Módulo de compilación C para Dredd: DAEDALUS con fallback a GCC (esper se retiró, N-ESPER-01)."""
 
 from dataclasses import dataclass, field
 import json
@@ -119,106 +119,6 @@ def compile_with_daedalus(
     return None
 
 
-def _try_import_esper():
-    return resolve_sibling_tool("esper", "esper.core.gcc_parser", "run_gcc_and_explain")
-
-
-def compile_with_esper(
-    c_files: List[Path],
-    output_bin: Optional[Path] = None,
-    extra_flags: Optional[List[str]] = None,
-) -> Optional[CompilationResult]:
-    """Intenta compilar usando la biblioteca o CLI de ESPER (o delega en DAEDALUS)."""
-    # Preferir delegar en Daedalus si está disponible
-    daed_res = compile_with_daedalus(c_files, output_bin=output_bin, extra_flags=extra_flags)
-    if daed_res is not None:
-        return daed_res
-
-    out_target = str(output_bin) if output_bin else "/dev/null"
-    flags = extra_flags or ["-Wall", "-Wextra", "-std=c11"]
-    args = flags + [str(f) for f in c_files] + ["-o", out_target]
-
-    # 1. Import directo de Python
-    run_gcc_fn = _try_import_esper()
-    if run_gcc_fn:
-        try:
-            report = run_gcc_fn(args)
-            diags = []
-            for d in report.diagnostics:
-                sev = d.severity.value if hasattr(d.severity, "value") else str(d.severity)
-                tr_msg = f"{d.title_es}: {d.explanation_es}" if d.title_es and d.explanation_es else (d.title_es or d.explanation_es or d.raw_message)
-                diags.append({
-                    "file": d.file_path,
-                    "line": d.line_number,
-                    "severity": sev.upper(),
-                    "translated_message": tr_msg,
-                    "suggestion": d.suggestion_es,
-                    "raw_message": d.raw_message,
-                    "code_snippet": d.code_snippet,
-                })
-
-            cmd_list = getattr(report, "command", ["gcc"] + args)
-            ret_code = getattr(report, "exit_code", 0 if report.passed else 1)
-            raw_err = getattr(report, "raw_stderr", "") or ""
-            raw_out = getattr(report, "raw_stdout", "") or ""
-            full_out = f"{raw_out}\n{raw_err}".strip() if (raw_out and raw_err) else (raw_err or raw_out)
-            return CompilationResult(
-                success=report.passed,
-                output_bin=output_bin if report.passed and output_bin else None,
-                raw_stderr=raw_err,
-                raw_stdout=raw_out,
-                full_output=full_out,
-                translated_diagnostics=diags,
-                compiler_used="esper",
-                command=cmd_list,
-                returncode=ret_code,
-            )
-        except Exception:
-            pass
-
-    # 2. CLI de esper con --json
-    esper_bin = resolve_sibling_cli("esper")
-    if esper_bin:
-        try:
-            cmd = [str(esper_bin), "compile"] + args + ["--json"]
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            if proc.stdout.strip():
-                data = json.loads(proc.stdout)
-                raw_diags = data.get("diagnostics", [])
-                diags = []
-                for d in raw_diags:
-                    sev = str(d.get("severity", "ERROR")).upper()
-                    t_es = d.get("title_es", "")
-                    exp_es = d.get("explanation_es", "")
-                    tr_msg = f"{t_es}: {exp_es}" if t_es and exp_es else (t_es or exp_es or d.get("raw_message", ""))
-                    diags.append({
-                        "file": d.get("file_path", ""),
-                        "line": d.get("line_number", 1),
-                        "severity": sev,
-                        "translated_message": tr_msg,
-                        "suggestion": d.get("suggestion_es", ""),
-                        "raw_message": d.get("raw_message", ""),
-                        "code_snippet": d.get("code_snippet"),
-                    })
-                passed = data.get("passed", proc.returncode == 0)
-                raw_err = data.get("raw_stderr", proc.stderr)
-                return CompilationResult(
-                    success=passed,
-                    output_bin=output_bin if passed and output_bin else None,
-                    raw_stderr=raw_err,
-                    raw_stdout=proc.stdout,
-                    full_output=raw_err or proc.stderr,
-                    translated_diagnostics=diags,
-                    compiler_used="esper",
-                    command=cmd,
-                    returncode=proc.returncode,
-                )
-        except Exception:
-            pass
-
-    return None
-
-
 def compile_with_gcc(
     c_files: List[Path],
     output_bin: Optional[Path] = None,
@@ -259,7 +159,7 @@ def compile_c_sources(
     output_bin: Optional[Path] = None,
     extra_flags: Optional[List[str]] = None,
 ) -> CompilationResult:
-    """Compila archivos C utilizando prioritariamente DAEDALUS, con fallback a ESPER y GCC."""
+    """Compila archivos C con DAEDALUS y, si no está, con GCC directo."""
     if not c_files:
         return CompilationResult(
             success=False,
@@ -274,20 +174,15 @@ def compile_c_sources(
     if daed_res is not None:
         return daed_res
 
-    # 2. Intentar compilar con ESPER
-    esper_res = compile_with_esper(c_files, output_bin=output_bin, extra_flags=extra_flags)
-    if esper_res is not None:
-        return esper_res
-
-    # 3. Fallback a GCC
+    # 2. Fallback a GCC
     gcc_res = compile_with_gcc(c_files, output_bin=output_bin, extra_flags=extra_flags)
     if gcc_res is not None:
         return gcc_res
 
     return CompilationResult(
         success=False,
-        raw_stderr="Ni DAEDALUS, ni ESPER, ni GCC se encuentran disponibles en el sistema.",
-        full_output="Ni DAEDALUS, ni ESPER, ni GCC se encuentran disponibles en el sistema.",
+        raw_stderr="Ni DAEDALUS ni GCC se encuentran disponibles en el sistema.",
+        full_output="Ni DAEDALUS ni GCC se encuentran disponibles en el sistema.",
         compiler_used="none",
         returncode=1,
     )

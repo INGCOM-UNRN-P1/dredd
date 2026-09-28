@@ -1,5 +1,6 @@
 """Tests para verificar la resolución de los hallazgos de auditoría (DREDD-D0102 a D0903)."""
 
+import re
 import json
 from pathlib import Path
 import pytest
@@ -65,7 +66,7 @@ def test_ecosystem_sibling_resolution():
 
 
 def test_doctor_includes_ecosystem_tools():
-    """DREDD-D0403: doctor verifica daedalus, esper, nostromo, gaff, spunkmeyer, etc."""
+    """DREDD-D0403: doctor verifica daedalus, nostromo, gaff, spunkmeyer, etc. (esper se retiró: N-ESPER-01)."""
     from io import StringIO
     from rich.console import Console
 
@@ -74,8 +75,9 @@ def test_doctor_includes_ecosystem_tools():
     ejecutar_diagnostico_doctor(console=cons)
     out = buf.getvalue()
 
-    for tool in ["gcc", "daedalus", "esper", "valgrind", "nostromo", "gaff", "spunkmeyer", "deckard"]:
+    for tool in ["gcc", "daedalus", "valgrind", "nostromo", "gaff", "spunkmeyer", "deckard"]:
         assert tool in out, f"Herramienta '{tool}' ausente en la salida de dredd doctor"
+    assert not re.search(r"\besper\b", out)
 
 
 def test_config_p1_alias_and_unknown_keys(tmp_path: Path):

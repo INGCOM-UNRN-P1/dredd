@@ -311,7 +311,7 @@ def write_individual_tool_reports(
         compiler_upper = raw_compiler.upper()
         if "daedalus" in raw_compiler.lower():
             comp_header = f"## Compilación — Daedalus ({compiler_upper})"
-        elif "esper" in raw_compiler.lower():
+        elif "esper" in raw_compiler.lower():  # resultados guardados antes de retirar esper
             comp_header = f"## Compilación — Esper / GCC ({compiler_upper})"
         else:
             comp_header = f"## Compilación — GCC ({compiler_upper})"

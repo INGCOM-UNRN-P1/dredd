@@ -56,7 +56,6 @@ def chequear_capacidades_kernel() -> Dict[str, bool]:
 HERRAMIENTAS = [
     ("gcc", "Compilación de código C (fallback nativo)", True, "sudo apt install build-essential"),
     ("daedalus", "Compilador pedagógico oficial con flags cátedra P1", False, "uv tool install git+https://github.com/INGCOM-UNRN-P1/daedalus"),
-    ("esper", "Explicador de diagnósticos GCC (deprecado: lo reemplaza daedalus)", False, "uv tool install git+https://github.com/INGCOM-UNRN-P1/daedalus"),
     ("valgrind", "Detección de fugas de memoria y memory errors", False, "sudo apt install valgrind"),
     ("nostromo", "Sandbox de aislamiento Bubblewrap y runner de tests", False, "uv tool install git+https://github.com/INGCOM-UNRN-P1/nostromo"),
     ("bwrap", "Sandbox de aislamiento Bubblewrap en el sistema", False, "sudo apt install bubblewrap"),
