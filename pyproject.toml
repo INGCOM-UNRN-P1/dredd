@@ -1,6 +1,6 @@
 [project]
 name = "dredd"
-version = "2.0.0"
+version = "2.1.0"
 description = "Multi-channel batch autograder and submission manager for C programming courses (GitHub Classroom & Moodle)"
 readme = "README.md"
 license = {text = "GPL-3.0-or-later"}
