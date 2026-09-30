@@ -759,6 +759,11 @@ def cmd_map(
 
     workspace_dir = Path.cwd()
     exercise_slug, submissions_dir = resolve_submissions_dir(workspace_dir, activity)
+    if not submissions_dir.is_dir():
+        # El resolvedor devuelve la carpeta por omisión para descargas nuevas; acá tiene que existir:
+        # antes respondía «No se encontraron archivos .c para mapear» con código 0 (N-ECO-18).
+        Console(stderr=True).print(f"[bold red]Error:[/bold red] no hay entregas de «{activity}»: no existe {submissions_dir}.")
+        raise typer.Exit(code=2)
     guide = load_activity_guide(submissions_dir, exercise_slug, workspace_dir)
 
     if exercises:
@@ -1808,6 +1813,8 @@ def cmd_eval_shielded(
         console.print(f"[bold green]STDOUT:[/bold green]\n{out}")
     if err:
         console.print(f"[bold yellow]STDERR:[/bold yellow]\n{err}")
+    # El código del proceso aislado; si no se pudo ejecutar (-1) o se cortó, 1. Antes siempre 0 (N-ECO-18).
+    raise typer.Exit(code=retcode if 0 <= retcode <= 255 and not timed_out else 1)
 
 
 @app.command("report-template")
