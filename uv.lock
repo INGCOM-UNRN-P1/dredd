@@ -252,6 +252,7 @@ dependencies = [
     { name = "tree-sitter" },
     { name = "tree-sitter-c" },
     { name = "typer" },
+    { name = "yutani" },
 ]
 
 [package.optional-dependencies]
@@ -285,6 +286,7 @@ requires-dist = [
     { name = "tree-sitter", specifier = ">=0.23.0" },
     { name = "tree-sitter-c", specifier = ">=0.23.0" },
     { name = "typer", specifier = ">=0.12.0" },
+    { name = "yutani", git = "https://github.com/INGCOM-UNRN-P1/yutani?rev=e4c8e1050e5dd87a930c5404aba6b65d1be1665a" },
 ]
 provides-extras = ["ecosistema", "guias"]
 
@@ -1043,6 +1045,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d5/a0/8fd707bcb776a7be556bad06a2ea5fb9bd519df78ef8e26f70ccf0f38bff/webencodings-0.6.1.tar.gz", hash = "sha256:565f9ad031c702dae404e27a099e3e09186a3ab1b9520f06d215502b651fd910", size = 15001, upload-time = "2026-08-15T14:22:57.549Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/77/c6/040cbc72480d789a5f40d63fb484d3106554c4dfa2d2b70ad5022057750f/webencodings-0.6.1-py3-none-any.whl", hash = "sha256:7fab6269c8bf237c657876b52058ccb182e861518d1c695c1a9aaa8c1c105d5b", size = 8745, upload-time = "2026-08-15T14:22:56.31Z" },
+]
+
+[[package]]
+name = "yutani"
+version = "0.1.0"
+source = { git = "https://github.com/INGCOM-UNRN-P1/yutani?rev=e4c8e1050e5dd87a930c5404aba6b65d1be1665a#e4c8e1050e5dd87a930c5404aba6b65d1be1665a" }
+dependencies = [
+    { name = "rich" },
+    { name = "typer" },
 ]
 
 [[package]]

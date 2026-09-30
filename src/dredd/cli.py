@@ -22,9 +22,12 @@ from dredd.core.moodle import export_grades_csv, unpack_moodle_zip
 from dredd.core.plagiarism import PlagiarismDetector
 from dredd.core.reporter import find_student_report, generate_student_report, resolve_submission_revision
 from dredd.core.ripley_client import run_ripley_analysis
-from dredd.errores import TyperConErrores
+from yutani.cli import TyperConErrores
+from yutani.textos import traducir
 
 # La app raíz muestra los errores de datos como mensajes (N-ECO-05).
+# Ayuda y errores de Typer/Click en español, desde yutani (N-ECO-14).
+traducir()
 app = TyperConErrores(
     context_settings={"help_option_names": ["-h", "--help"]},
     name="dredd",
