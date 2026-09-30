@@ -24,7 +24,9 @@ jobs:
           enable-cache: true
 
       - name: Sincronizar dependencias
-        run: uv sync --all-extras
+        # Sin el extra `guias`: deckard está en INGCOM-UNRN y es privado, así que el runner no puede
+        # bajarlo (N-ECO-11). dredd lo resuelve en tiempo de ejecución y los tests no lo necesitan.
+        run: uv sync --extra ecosistema
 
       - name: Ejecutar suite de pruebas
         run: uv run pytest -q
