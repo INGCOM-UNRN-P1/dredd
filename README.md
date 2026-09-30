@@ -231,3 +231,59 @@ src/dredd/
     ├── submission_typology.py # Clasificación tipológica de estilos de entrega
     └── valgrind.py      # Runner y parser de reportes XML de Valgrind
 ```
+
+<!-- p1:referencia:inicio — generado por p1-tools/scripts/readme_generado.py: no editar a mano -->
+
+## Referencia rápida
+
+### Requisitos
+
+- Python ≥ 3.11 y [uv](https://docs.astral.sh/uv/getting-started/installation/).
+- Programas del sistema: `gcc`, `git`, `bwrap`.
+
+| Sistema | `gcc` | `git` | `bwrap` |
+|:--|:--|:--|:--|
+| Debian / Ubuntu | `sudo apt install gcc` | `sudo apt install git` | `sudo apt install bubblewrap` |
+| Fedora | `sudo dnf install gcc` | `sudo dnf install git` | `sudo dnf install bubblewrap` |
+| Windows | incluido en el entorno de la cátedra (MSYS2 UCRT64) | incluido en el entorno de la cátedra (MSYS2 UCRT64) | no existe (solo Linux): usar WSL |
+| macOS | `xcode-select --install` (clang como `gcc`) | `xcode-select --install` | no existe (solo Linux) |
+
+### Comandos
+
+| Comando | Descripción |
+|:--|:--|
+| `dredd init` | Inicializa un espacio de trabajo de Dredd con carpetas estructuradas y mapeo declarativo en dredd.yaml. |
+| `dredd eval` | Clona/actualiza el repositorio o evalúa entregas locales, ejecuta el análisis con Ripley y genera el informe Markdown. |
+| `dredd plagiarism` | Calcula la matriz de similitud Winnowing entre todas las entregas descargadas. |
+| `dredd map` | Mapeo interactivo y heurístico entre archivos C de estudiantes y especificaciones de la guía. |
+| `dredd export` | Exporta calificaciones CSV, paquete ZIP de retroalimentación y dashboard consolidado de cohorte. |
+| `dredd export-report` | Convierte un informe Markdown a HTML autocontenido enriquecido o PDF (zero-dependencies). |
+| `dredd fuzz-gen` | fuzz-gen: endurece el banco generando casos límite contra la solución modelo. |
+| `dredd oral-guide` | oral-exam-companion: genera una guía de preguntas para coloquio/defensa. |
+| `dredd multiplex` | Alias docente de conveniencia que delega la generación de variantes y asignación en Deckard. |
+| `dredd doctor` | Verifica dependencias externas del sistema (GCC, Valgrind, Bubblewrap, Git, Ripley). |
+| `dredd rerun` | Re-ejecuta la evaluación sobre entregas desaprobadas o con observaciones críticas. |
+| `dredd export-guarani` | Exporta las calificaciones finales en formato estándar de actas de SIU Guaraní. |
+| `dredd serve-dashboard`, `dredd dashboard` | Inicia un servidor web local para visualizar el dashboard de notas y plagio. |
+| `dredd audit-git` | Audita anomalías temporales y patrones de desarrollo en commits de Git. |
+| `dredd git-forensics` | Audita marcas de tiempo en Git para detectar alteraciones manuales o rebase masivo previo a entrega. |
+| `dredd notify-batch`, `dredd export-feedback` | Empaqueta y exporta los informes individuales alumno_rN.md en un lote consolidado con ZIP. |
+| `dredd plagiarism-historical` | Detecta plagio cruzado inter-anual contra entregas históricas. |
+| `dredd diff-revision`, `dredd diff-submission` | Compara dos versiones sucesivas de una entrega (R1 vs R2) mostrando cambios en código y funciones (QoL 3.15). |
+| `dredd late-penalty` | Calcula la penalización gradual por entrega fuera de término. |
+| `dredd audit-makefile` | Audita Makefiles en busca de dependencias prohibidas, flags suprimidas y trampas. |
+| `dredd typology` | Clasifica automáticamente la tipología arquitectónica de una entrega (monolítica, modular, librería, incompleta). |
+| `dredd eval-stability` | Evalúa la estabilidad temporal y determinismo de una solución mediante corridas reiteradas. |
+| `dredd cohort-bench` | Ejecuta benchmarking algorítmico comparativo de CPU y memoria en toda la cohorte. |
+| `dredd smith-adversary` | Genera e inyecta casos de prueba adversarios y de estrés (integración smith). |
+| `dredd eval-shielded` | Ejecuta un proceso bajo el modo 'Sandbox Blindado' con corte total de red y namespaces aislados. |
+| `dredd report-template` | Renderiza o valida plantillas de feedback Markdown enriquecidas con variables contextuales. |
+| `dredd sanitize-output` | Sanitiza flujos de salida o logs estudiantiles eliminando secuencias ANSI y truncando si excede el límite. |
+| `dredd moodle` | Gestión de canales Moodle (ingesta ZIP y planillas). |
+| `dredd github` | Comandos de integración con GitHub (clone, comment, pr-fix). |
+| `dredd config` | Gestión de configuración, entregas, guías y políticas de chequeo. |
+| `dredd evaluate` | Evaluación docente, autograding y limpieza de entregas. |
+
+Ayuda de cada comando: `dredd <comando> -h`.
+
+<!-- p1:referencia:fin -->
