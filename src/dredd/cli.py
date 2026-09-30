@@ -776,7 +776,7 @@ def cmd_map(
 
 @moodle_app.command("ingest")
 def cmd_moodle_ingest(
-    zip_file: Path = typer.Argument(..., help="Archivo ZIP descargado de Moodle con las entregas de la tarea."),
+    zip_file: Path = typer.Argument(..., exists=True, help="Archivo ZIP descargado de Moodle con las entregas de la tarea."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Solo simular la extracción sin escribir en disco."),
     force: bool = typer.Option(False, "--force", "-f", help="Re-ingestar sobrescribiendo revisiones previas."),
 ) -> None:
@@ -836,7 +836,7 @@ def cmd_export(
 
 @app.command("export-report")
 def cmd_export_report(
-    source: Path = typer.Argument(..., help="Ruta al archivo Markdown (.md) del informe."),
+    source: Path = typer.Argument(..., exists=True, help="Ruta al archivo Markdown (.md) del informe."),
     fmt: str = typer.Option("html", "--format", "-f", help="Formato de exportación: 'html' o 'pdf'."),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Ruta del archivo de salida."),
     title: str = typer.Option("Informe de Evaluación — Dredd", "--title", "-t", help="Título del informe."),
@@ -1348,7 +1348,7 @@ def cmd_rerun(
 @app.command("export-guarani")
 @moodle_app.command("export-guarani")
 def cmd_export_guarani(
-    entregas: Path = typer.Argument(Path("entregas"), help="Directorio de entregas o base de datos de calificaciones."),
+    entregas: Path = typer.Argument(Path("entregas"), exists=True, help="Directorio de entregas o base de datos de calificaciones."),
     output: Path = typer.Option(Path("acta_guarani.csv"), "--output", "-o", help="Ruta de destino del CSV de SIU Guaraní."),
 ) -> None:
     """Exporta las calificaciones finales en formato estándar de actas de SIU Guaraní."""
@@ -1408,7 +1408,7 @@ def cmd_dashboard(
 
 @app.command("audit-git")
 def cmd_audit_git(
-    repo: Path = typer.Argument(Path("."), help="Ruta al repositorio de la entrega a auditar."),
+    repo: Path = typer.Argument(Path("."), exists=True, help="Ruta al repositorio de la entrega a auditar."),
 ) -> None:
     """Audita anomalías temporales y patrones de desarrollo en commits de Git."""
     from dredd.core.git_anomaly import auditar_historial_git
@@ -1417,7 +1417,7 @@ def cmd_audit_git(
 
 @app.command("git-forensics")
 def cmd_git_forensics(
-    repo: Path = typer.Argument(Path("."), help="Ruta al repositorio de la entrega a auditar."),
+    repo: Path = typer.Argument(Path("."), exists=True, help="Ruta al repositorio de la entrega a auditar."),
     max_skew: int = typer.Option(300, "--max-skew", help="Tolerancia en segundos para desfase entre autor y committer."),
     json_output: bool = typer.Option(False, "--json", help="Exporta el resultado en formato JSON estándar."),
     fail_on_anomaly: bool = typer.Option(False, "--fail-on-anomaly", help="Finaliza con código de error si el riesgo forense es ALTO."),
@@ -1438,7 +1438,7 @@ def cmd_git_forensics(
 @app.command("export-feedback")
 @app.command("notify-batch")
 def cmd_export_feedback(
-    entregas: Path = typer.Argument(Path("entregas"), help="Directorio con las entregas de los estudiantes."),
+    entregas: Path = typer.Argument(Path("entregas"), exists=True, help="Directorio con las entregas de los estudiantes."),
     output: Path = typer.Option(Path("feedbacks_lote"), "--output", "-o", help="Directorio de destino para los reportes."),
 ) -> None:
     """Empaqueta y exporta los informes individuales alumno_rN.md en un lote consolidado con ZIP."""
@@ -1448,8 +1448,8 @@ def cmd_export_feedback(
 
 @app.command("plagiarism-historical")
 def cmd_plagiarism_historical(
-    dir_actual: Path = typer.Argument(..., help="Directorio de entregas del cuatrimestre actual."),
-    dir_historico: Path = typer.Argument(..., help="Directorio de entregas históricas de años previos."),
+    dir_actual: Path = typer.Argument(..., exists=True, help="Directorio de entregas del cuatrimestre actual."),
+    dir_historico: Path = typer.Argument(..., exists=True, help="Directorio de entregas históricas de años previos."),
     umbral: float = typer.Option(0.70, "--threshold", "-t", help="Umbral de similitud mínima para alertar plagio."),
 ) -> None:
     """Detecta plagio cruzado inter-anual contra entregas históricas."""
@@ -1601,7 +1601,7 @@ def cmd_late_penalty(
 
 @app.command("audit-makefile")
 def cmd_audit_makefile(
-    objetivo: Path = typer.Argument(..., help="Ruta al archivo Makefile o al directorio de la entrega."),
+    objetivo: Path = typer.Argument(..., exists=True, help="Ruta al archivo Makefile o al directorio de la entrega."),
     json_output: bool = typer.Option(False, "--json", help="Salida en formato JSON."),
 ) -> None:
     """Audita Makefiles en busca de dependencias prohibidas, flags suprimidas y trampas."""
@@ -1638,7 +1638,7 @@ def cmd_audit_makefile(
 
 @app.command("typology")
 def cmd_typology(
-    directorio: Path = typer.Argument(..., help="Directorio de la entrega del alumno o carpeta de entregas."),
+    directorio: Path = typer.Argument(..., exists=True, help="Directorio de la entrega del alumno o carpeta de entregas."),
     json_output: bool = typer.Option(False, "--json", help="Salida en formato JSON."),
 ) -> None:
     """Clasifica automáticamente la tipología arquitectónica de una entrega (monolítica, modular, librería, incompleta)."""
@@ -1673,7 +1673,7 @@ def cmd_typology(
 
 @app.command("eval-stability")
 def cmd_eval_stability(
-    binario: Path = typer.Argument(..., help="Ruta al binario ejecutable C."),
+    binario: Path = typer.Argument(..., exists=True, help="Ruta al binario ejecutable C."),
     repeticiones: int = typer.Option(5, "--repeticiones", "-n", help="Número de ejecuciones consecutivas."),
     input_data: str = typer.Option("", "--input", "-i", help="Datos de entrada stdin para el proceso."),
     timeout: float = typer.Option(3.0, "--timeout", "-t", help="Timeout por corrida en segundos."),
@@ -1703,7 +1703,7 @@ def cmd_eval_stability(
 
 @app.command("cohort-bench")
 def cmd_cohort_bench(
-    entregas: Path = typer.Argument(..., help="Directorio contenedor de las entregas de la cohorte."),
+    entregas: Path = typer.Argument(..., exists=True, help="Directorio contenedor de las entregas de la cohorte."),
     binario: str = typer.Option("main", "--bin", "-b", help="Nombre del archivo binario ejecutable a comparar."),
     input_data: str = typer.Option("", "--input", "-i", help="Datos de entrada para el benchmark."),
     timeout: float = typer.Option(5.0, "--timeout", "-t", help="Timeout máximo por entrega en segundos."),
@@ -1738,7 +1738,7 @@ def cmd_cohort_bench(
 
 @app.command("smith-adversary")
 def cmd_smith_adversary(
-    target: Path = typer.Argument(..., help="Ruta a binario ejecutable o directorio de tests para inyección."),
+    target: Path = typer.Argument(..., exists=True, help="Ruta a binario ejecutable o directorio de tests para inyección."),
     inject: bool = typer.Option(False, "--inject", help="Inyectar casos adversarios .in en la carpeta destino."),
     timeout: float = typer.Option(2.0, "--timeout", "-t", help="Timeout por caso adversario en segundos."),
     json_output: bool = typer.Option(False, "--json", help="Salida en formato JSON."),
@@ -1860,7 +1860,7 @@ def cmd_report_template(
 
 @app.command("sanitize-output")
 def cmd_sanitize_output(
-    file: Path = typer.Argument(..., help="Archivo de log o volcado de salida a sanitizar."),
+    file: Path = typer.Argument(..., exists=True, help="Archivo de log o volcado de salida a sanitizar."),
     max_mb: int = typer.Option(10, "--max-mb", help="Límite máximo seguro en megabytes antes de truncar."),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Archivo de destino (por defecto sobrescribe el original)."),
     no_strip_ansi: bool = typer.Option(False, "--no-strip-ansi", help="No remover secuencias de escape ANSI."),
