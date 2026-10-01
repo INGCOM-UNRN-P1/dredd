@@ -278,7 +278,7 @@ requires-dist = [
     { name = "deckard", marker = "extra == 'guias'", git = "https://github.com/INGCOM-UNRN/deckard?rev=cf3c64ace2a9cfae1d758ceb674ca2bb4b0995af" },
     { name = "gaff", marker = "extra == 'ecosistema'", git = "https://github.com/INGCOM-UNRN-P1/gaff?rev=64aa958f6b834e013c4d5254b75f0883e475b84f" },
     { name = "jinja2", specifier = ">=3.1.3" },
-    { name = "nostromo", marker = "extra == 'ecosistema'", git = "https://github.com/INGCOM-UNRN-P1/nostromo?rev=82a8797d1ddb878c57e39599a0a9a3bc5229f675" },
+    { name = "nostromo", marker = "extra == 'ecosistema'", git = "https://github.com/INGCOM-UNRN-P1/nostromo?rev=6469841e133c0ef63ceffdfd9dabb440d7cbaf8c" },
     { name = "python-slugify", specifier = ">=8.0.4" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "rich", specifier = ">=13.7.0" },
@@ -286,7 +286,7 @@ requires-dist = [
     { name = "tree-sitter", specifier = ">=0.23.0" },
     { name = "tree-sitter-c", specifier = ">=0.23.0" },
     { name = "typer", specifier = ">=0.12.0" },
-    { name = "yutani", git = "https://github.com/INGCOM-UNRN-P1/yutani?rev=e4c8e1050e5dd87a930c5404aba6b65d1be1665a" },
+    { name = "yutani", git = "https://github.com/INGCOM-UNRN-P1/yutani?rev=4b99a428c28ab5f3c3013b770b9692ade6182fc2" },
 ]
 provides-extras = ["ecosistema", "guias"]
 
@@ -506,7 +506,7 @@ wheels = [
 [[package]]
 name = "nostromo"
 version = "0.2.0"
-source = { git = "https://github.com/INGCOM-UNRN-P1/nostromo?rev=82a8797d1ddb878c57e39599a0a9a3bc5229f675#82a8797d1ddb878c57e39599a0a9a3bc5229f675" }
+source = { git = "https://github.com/INGCOM-UNRN-P1/nostromo?rev=6469841e133c0ef63ceffdfd9dabb440d7cbaf8c#6469841e133c0ef63ceffdfd9dabb440d7cbaf8c" }
 dependencies = [
     { name = "pyyaml" },
     { name = "rich" },
@@ -1051,7 +1051,7 @@ wheels = [
 [[package]]
 name = "yutani"
 version = "0.1.0"
-source = { git = "https://github.com/INGCOM-UNRN-P1/yutani?rev=e4c8e1050e5dd87a930c5404aba6b65d1be1665a#e4c8e1050e5dd87a930c5404aba6b65d1be1665a" }
+source = { git = "https://github.com/INGCOM-UNRN-P1/yutani?rev=4b99a428c28ab5f3c3013b770b9692ade6182fc2#4b99a428c28ab5f3c3013b770b9692ade6182fc2" }
 dependencies = [
     { name = "rich" },
     { name = "typer" },

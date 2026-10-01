@@ -33,7 +33,7 @@ dependencies = [
     "tree-sitter>=0.23.0",
     "tree-sitter-c>=0.23.0",
     # Núcleo común del ecosistema (N-ECO-14): TyperConErrores y textos en español.
-    "yutani @ git+https://github.com/INGCOM-UNRN-P1/yutani@e4c8e1050e5dd87a930c5404aba6b65d1be1665a",
+    "yutani @ git+https://github.com/INGCOM-UNRN-P1/yutani@4b99a428c28ab5f3c3013b770b9692ade6182fc2",
 ]
 
 [project.optional-dependencies]
@@ -41,7 +41,7 @@ dependencies = [
 # a commits publicados; sin el extra se usa el camino propio (gcc, sin sandbox de nostromo…).
 ecosistema = [
     "daedalus @ git+https://github.com/INGCOM-UNRN-P1/daedalus@cd3eb998193cd5bd9ea881aa9a0e19f5fe6d9a86",
-    "nostromo @ git+https://github.com/INGCOM-UNRN-P1/nostromo@82a8797d1ddb878c57e39599a0a9a3bc5229f675",
+    "nostromo @ git+https://github.com/INGCOM-UNRN-P1/nostromo@6469841e133c0ef63ceffdfd9dabb440d7cbaf8c",
     "gaff @ git+https://github.com/INGCOM-UNRN-P1/gaff@64aa958f6b834e013c4d5254b75f0883e475b84f",
     "spunkmeyer @ git+https://github.com/INGCOM-UNRN-P1/spunkmeyer@ec9cbd266f9d187c787f528997f1ae0c09dd8ff2",
 ]
