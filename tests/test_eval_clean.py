@@ -170,8 +170,8 @@ def test_cli_eval_flag_clean_and_force(tmp_path: Path, monkeypatch):
     def mock_ejecutar_evaluacion(**kwargs):
         called.append(kwargs)
 
-    import dredd.cli
-    monkeypatch.setattr(dredd.cli, "ejecutar_evaluacion", mock_ejecutar_evaluacion)
+    import dredd.cli.evaluacion
+    monkeypatch.setattr(dredd.cli.evaluacion, "ejecutar_evaluacion", mock_ejecutar_evaluacion)
 
     res = runner.invoke(app, ["eval", str(entregas), "--clean"])
     assert res.exit_code == 0
