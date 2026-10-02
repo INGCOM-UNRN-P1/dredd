@@ -40,10 +40,12 @@ dependencies = [
 # Herramientas del ecosistema que se usan como biblioteca (N-ECO-01). Referencias git fijadas
 # a commits publicados; sin el extra se usa el camino propio (gcc, sin sandbox de nostromo…).
 ecosistema = [
-    "daedalus @ git+https://github.com/INGCOM-UNRN-P1/daedalus@9cefe644353851858f2e77b7936ed34ae1c510ea",
+    "daedalus @ git+https://github.com/INGCOM-UNRN-P1/daedalus@b4db9fa784380a9c70e2486e699556c30f2f3cfb",
     "nostromo @ git+https://github.com/INGCOM-UNRN-P1/nostromo@ec62a77c6452750df644b78382e0ec6fb12a0f00",
-    "gaff @ git+https://github.com/INGCOM-UNRN-P1/gaff@9f29161905bcf5a5cdfaf057d0d265e4221518a2",
+    "gaff @ git+https://github.com/INGCOM-UNRN-P1/gaff@204109e246024b0d56ec1b6ee860f4bbbd701705",
     "spunkmeyer @ git+https://github.com/INGCOM-UNRN-P1/spunkmeyer@e89e4143bd43e4d626a3521125585dde4a3809a2",
+    "drake @ git+https://github.com/INGCOM-UNRN-P1/drake@f1ed14e7da78dc25bdf1fe8865806d87fe7802b0",
+    "wierzbowski @ git+https://github.com/INGCOM-UNRN-P1/wierzbowski@41528e5cae752e2e616f79f597402d2566f000eb",
 ]
 
 # Multiplexado de trabajos prácticos con las guías de deckard.

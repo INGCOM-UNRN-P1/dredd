@@ -11,6 +11,13 @@ from dredd.core.guide_integration import load_activity_guide
 from dredd.core.plagiarism import PlagiarismDetector
 from dredd.cli._base import _unwrap_cli_value, console  # noqa: F401
 
+_err = Console(stderr=True)
+
+
+def _aviso_traslado(comando: str, reemplazo: str) -> None:
+    """Los comandos duplicados pasan a su herramienta dueña (revisión 04 §5, N-ECO-12)."""
+    _err.print(f"[yellow]Aviso:[/yellow] `dredd {comando}` pasa a `{reemplazo}` y se va a retirar.")
+
 
 def cmd_plagiarism(
     exercise: str = typer.Argument(..., help="Nombre de la actividad o directorio de entregas a auditar."),
@@ -104,7 +111,11 @@ def fuzz_gen(
     fuzzing guiado por cobertura. Cada candidato se ejecuta contra el modelo
     para fijar la salida esperada; duplicados y crashes se reportan aparte.
     """
-    from dredd.core.fuzz_gen import generar_testcases
+    _aviso_traslado("fuzz-gen", "drake gen-casos")
+    try:  # con el extra `ecosistema`, el generador de drake (el dueño del fuzzing)
+        from drake.core.generar_casos import generar_testcases
+    except ImportError:
+        from dredd.core.fuzz_gen import generar_testcases
 
     espec = None
     if spec:
@@ -242,6 +253,8 @@ def cmd_audit_makefile(
 ) -> None:
     """Audita Makefiles en busca de dependencias prohibidas, flags suprimidas y trampas."""
     import json
+
+    _aviso_traslado("audit-makefile", "wierzbowski makefile")
     from dredd.core.makefile_audit import auditar_makefile
 
     mk_path = objetivo if objetivo.is_file() else (objetivo / "Makefile" if (objetivo / "Makefile").is_file() else objetivo / "makefile")
