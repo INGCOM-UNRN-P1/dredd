@@ -154,6 +154,26 @@ Re-ejecuta evaluaciones sobre entregas previas sin repetir descargas o clones in
 dredd rerun tp01 --failed-only --dry-run
 ```
 
+#### Devolución con enlaces y errores de la cohorte (`dredd cluster-errors`)
+Cada evaluación deja en `rNi/` un `hallazgos.json` con lo encontrado en la forma común del
+ecosistema (`yutani.hallazgos`) y agrega al informe del estudiante la sección **Para repasar**:
+los temas del apunte donde tuvo errores, con el enlace a la página y a cada regla.
+`cluster-errors` junta los de todo el curso (la última revisión de cada estudiante) y muestra qué
+errores y qué temas tuvo más gente: lo que conviene reforzar en clase.
+
+```bash
+dredd cluster-errors informes/tp01 --top 10
+```
+
+#### Registro de auditoría para reclamos (`dredd audit-versions`)
+Junto a cada revisión queda `auditoria.json`: fecha, commit evaluado y versión de dredd, de cada
+satélite instalado y de gcc. `audit-versions` los lista y marca las entregas corregidas con
+versiones distintas de las del resto del curso, para volver a correrlas con lo mismo.
+
+```bash
+dredd audit-versions informes/tp01 --alumno estudiante42
+```
+
 #### Exportación de Actas SIU Guaraní (`dredd export-guarani`)
 Genera planillas tabulares compatibles con SIU Guaraní bajo codificación UTF-8-SIG y separadores punto y coma:
 
@@ -272,6 +292,8 @@ src/dredd/
 | `dredd diff-revision`, `dredd diff-submission` | Compara dos versiones sucesivas de una entrega (R1 vs R2) mostrando cambios en código y funciones (QoL 3.15). |
 | `dredd late-penalty` | Calcula la penalización gradual por entrega fuera de término. |
 | `dredd audit-makefile` | Audita Makefiles en busca de dependencias prohibidas, flags suprimidas y trampas. |
+| `dredd cluster-errors` | Errores y temas más frecuentes de la cohorte: cuántos estudiantes distintos tuvieron cada uno. |
+| `dredd audit-versions` | Con qué versión de cada herramienta se corrigió cada entrega (para resolver reclamos). |
 | `dredd typology` | Clasifica automáticamente la tipología arquitectónica de una entrega (monolítica, modular, librería, incompleta). |
 | `dredd eval-stability` | Evalúa la estabilidad temporal y determinismo de una solución mediante corridas reiteradas. |
 | `dredd cohort-bench` | Ejecuta benchmarking algorítmico comparativo de CPU y memoria en toda la cohorte. |
@@ -288,7 +310,7 @@ Ayuda de cada comando: `dredd <comando> -h`.
 
 ### Salida JSON
 
-Con `--json`, estos comandos emiten el resultado como JSON por la salida estándar, para usarlo desde scripts, ripley o dredd: `dredd eval`, `dredd doctor`, `dredd git-forensics`, `dredd diff-revision`, `dredd diff-submission`, `dredd late-penalty`, `dredd audit-makefile`, `dredd typology`, `dredd eval-stability`, `dredd cohort-bench`, `dredd smith-adversary`. El de `doctor --json` lleva `schema_version` y `ok`.
+Con `--json`, estos comandos emiten el resultado como JSON por la salida estándar, para usarlo desde scripts, ripley o dredd: `dredd eval`, `dredd doctor`, `dredd git-forensics`, `dredd diff-revision`, `dredd diff-submission`, `dredd late-penalty`, `dredd audit-makefile`, `dredd cluster-errors`, `dredd audit-versions`, `dredd typology`, `dredd eval-stability`, `dredd cohort-bench`, `dredd smith-adversary`. El de `doctor --json` lleva `schema_version` y `ok`.
 
 ### Códigos de salida
 

@@ -283,3 +283,55 @@ def cmd_audit_makefile(
         tabla.add_row(str(f.linea), sev_style, f.regla, f.mensaje, f.codigo[:40])
 
     console.print(tabla)
+
+
+def cmd_cluster_errors(
+    raiz: Path = typer.Argument(Path("."), exists=True, file_okay=False, help="Directorio con los informes del curso (busca rNi/hallazgos.json)."),
+    top: int = typer.Option(15, "--top", "-n", help="Cuántos errores mostrar."),
+    json_output: bool = typer.Option(False, "--json", help="Salida en formato JSON."),
+) -> None:
+    """Errores y temas más frecuentes de la cohorte: cuántos estudiantes distintos tuvieron cada uno."""
+    from dredd.core.cohorte import agrupar_cohorte
+
+    datos = agrupar_cohorte(raiz)
+    if json_output:
+        print(json.dumps(datos, indent=2, ensure_ascii=False))
+        return
+    if not datos["estudiantes"]:
+        console.print(f"[yellow]No hay hallazgos.json en {raiz}: corré antes la evaluación (dredd eval).[/yellow]")
+        return
+    temas = Table(title=f"Temas con más errores ({datos['estudiantes']} estudiantes)")
+    for columna in ("Tema", "Estudiantes", "%", "Apunte"):
+        temas.add_column(columna)
+    for t in datos["temas"]:
+        temas.add_row(t["descripcion"], str(t["alumnos"]), f"{t['porcentaje']:g}", t["enlace"] or "—")
+    console.print(temas)
+    errores = Table(title=f"Errores más frecuentes (los {top} primeros)")
+    for columna in ("Error", "Estudiantes", "%", "Ejemplo"):
+        errores.add_column(columna)
+    for e in datos["errores"][:top]:
+        errores.add_row(e["id"], str(e["alumnos"]), f"{e['porcentaje']:g}", e["ejemplo"][:70])
+    console.print(errores)
+
+
+def cmd_audit_versions(
+    raiz: Path = typer.Argument(Path("."), exists=True, file_okay=False, help="Directorio con los informes (busca rNi/auditoria.json)."),
+    alumno: Optional[str] = typer.Option(None, "--alumno", "-a", help="Solo las revisiones de este estudiante."),
+    json_output: bool = typer.Option(False, "--json", help="Salida en formato JSON."),
+) -> None:
+    """Con qué versión de cada herramienta se corrigió cada entrega (para resolver reclamos)."""
+    from dredd.core.auditoria import leer_registros, versiones_distintas
+
+    registros = [r for r in leer_registros(raiz) if alumno is None or r.get("alumno") == alumno]
+    distintas = versiones_distintas(leer_registros(raiz))
+    if json_output:
+        print(json.dumps({"registros": registros, "versiones_distintas": distintas}, indent=2, ensure_ascii=False))
+        return
+    tabla = Table(title="Registro de auditoría de la corrección")
+    for columna in ("Alumno", "Revisión", "Fecha", "Commit", "Versiones distintas al resto del curso"):
+        tabla.add_column(columna)
+    for r in registros:
+        dif = distintas.get(r["ruta"], {})
+        tabla.add_row(str(r.get("alumno")), str(r.get("revision")), str(r.get("fecha")), str(r.get("commit") or "—")[:10],
+                      ", ".join(f"{h} {v}" for h, v in dif.items()) or "—")
+    console.print(tabla)

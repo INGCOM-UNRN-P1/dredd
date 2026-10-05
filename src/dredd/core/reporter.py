@@ -677,6 +677,7 @@ def generate_consolidated_report_from_rni(
         "diagramas.md",
         "similarity.md",
         "oral_questions.md",
+        "para_repasar.md",
     ]
     included_files = set()
 
@@ -903,6 +904,14 @@ def generate_student_report(
 
     # 2. Escribir informes individuales de cada herramienta en rNi/
     write_individual_tool_reports(rni_dir, analysis, metadata=metadata, guide=guide)
+
+    # 2b. Hallazgos en la taxonomía común, «Para repasar» con enlaces al apunte y registro de
+    # auditoría (con qué versión de cada herramienta se corrigió, para reclamos).
+    from dredd.core.auditoria import registrar
+    from dredd.core.cohorte import escribir as escribir_hallazgos
+    escribir_hallazgos(rni_dir, analysis)
+    registrar(rni_dir, alumno=student, actividad=exercise, revision=rev_tag,
+              commit=(metadata.full_hash or None) if metadata else None)
 
     # 3. Generar informe consolidado a partir de rNi/
     return generate_consolidated_report_from_rni(

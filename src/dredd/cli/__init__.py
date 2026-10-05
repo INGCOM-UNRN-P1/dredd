@@ -49,6 +49,8 @@ from dredd.cli.exportacion import (  # noqa: F401
 )
 from dredd.cli.analisis import (  # noqa: F401
     cmd_audit_makefile,
+    cmd_audit_versions,
+    cmd_cluster_errors,
     cmd_doctor,
     cmd_map,
     cmd_multiplex,
@@ -97,6 +99,8 @@ app.command('diff-revision')(cmd_diff_submission)
 app.command('diff-submission')(cmd_diff_submission)
 app.command('late-penalty')(cmd_late_penalty)
 app.command('audit-makefile')(cmd_audit_makefile)
+app.command('cluster-errors')(cmd_cluster_errors)
+app.command('audit-versions')(cmd_audit_versions)
 app.command('typology')(cmd_typology)
 app.command('eval-stability')(cmd_eval_stability)
 app.command('cohort-bench')(cmd_cohort_bench)
