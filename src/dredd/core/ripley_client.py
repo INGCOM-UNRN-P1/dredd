@@ -602,7 +602,11 @@ def _collect_ast_findings(target_path: Path, checks: Any, uncompleted_set: Set[s
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
             if proc.returncode in (0, 1) and proc.stdout.strip():
                 data = json.loads(proc.stdout)
-                raw_findings = data.get("findings") or data.get("hallazgos") or []
+                # `hallazgos` de ripley es la forma común del ecosistema (codigo, mensaje…), no la de
+                # estas observaciones: de ahí solo se toman las que traen rule_code/code.
+                raw_findings = data.get("findings") or [
+                    h for h in data.get("hallazgos") or [] if "rule_code" in h or "code" in h
+                ]
                 for rf in raw_findings:
                     findings.append({
                         "rule_code": rf.get("rule_code") or rf.get("code") or "P1",

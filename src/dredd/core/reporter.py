@@ -193,37 +193,8 @@ def is_submission_failed(
     return False
 
 
-def write_individual_tool_reports(
-    rni_dir: Path,
-    analysis: Dict[str, Any],
-    metadata: Optional[RepoMetadata] = None,
-    guide: Optional[Any] = None,
-) -> Dict[str, Path]:
-    """Genera los informes individuales en Markdown para cada herramienta en el directorio rNi."""
-    rni_dir.mkdir(parents=True, exist_ok=True)
-    generated: Dict[str, Path] = {}
-
-    # 0. Resumen de Evaluación por Archivo (resumen.md)
-    comp = analysis.get("compilation", {})
-    files_comp = comp.get("files", {})
-    ast_findings = analysis.get("ast_findings", [])
-    style_findings = analysis.get("style_findings", [])
-    tests = analysis.get("tests", {})
-    cases = tests.get("cases", [])
-    val = analysis.get("valgrind", {})
-    binary_findings = analysis.get("binary_findings", [])
-
-    all_c_files = set(files_comp.keys())
-    for f in ast_findings:
-        if f.get("file"):
-            all_c_files.add(f.get("file"))
-    for sf in style_findings:
-        if sf.get("file"):
-            all_c_files.add(sf.get("file"))
-
-    if not all_c_files:
-        all_c_files.add("entrega_general")
-
+def _informe_resumen(all_c_files, analysis, ast_findings, binary_findings, cases, comp, files_comp, generated, rni_dir, style_findings) -> None:
+    """0. Resumen de Evaluación por Archivo (resumen.md)"""
     res_lines = ["## Resumen de Evaluación por Archivo\n"]
     b_info = analysis.get("baseline_info", {})
     if b_info.get("has_baseline") and b_info.get("uncompleted"):
@@ -259,11 +230,14 @@ def write_individual_tool_reports(
         obs_badge = f"{total_viols} advertencias" if total_viols > 0 else "Sin observaciones"
 
         res_lines.append(f"| `{f_name}` | {comp_badge} | {style_badge} | {val_badge} | {obs_badge} |")
-    
+
     res_path = rni_dir / "resumen.md"
     res_path.write_text("\n".join(res_lines) + "\n", encoding="utf-8")
     generated["resumen"] = res_path
 
+
+def _informe_binarios(binary_findings, generated, rni_dir) -> None:
+    """0.5. Auditoría de Archivos Binarios Prohibidos (binarios.md)"""
     # 0.5. Auditoría de Archivos Binarios Prohibidos (binarios.md)
     if binary_findings:
         bin_lines = [
@@ -285,6 +259,8 @@ def write_individual_tool_reports(
         generated["binarios"] = bin_path
 
 
+def _informe_daedalus(comp, files_comp, generated, rni_dir) -> None:
+    """1. Daedalus (Compilación)"""
     # 1. Daedalus (Compilación)
     is_project = comp.get("is_project") or comp.get("compiler_used") in ("make_proyecto", "make_project")
     if rni_dir.name.startswith("i_"):
@@ -352,19 +328,10 @@ def write_individual_tool_reports(
         daed_path.write_text("\n".join(comp_lines) + "\n", encoding="utf-8")
         generated["daedalus"] = daed_path
 
+
+def _informe_ripley(ast_p1_findings, generated, rni_dir) -> None:
+    """2. Linter de Reglas P1 (AST nativo / Ripley)"""
     # 2. Linter de Reglas P1 (AST nativo / Ripley)
-    gaff_rules = {f"{sf.get('rule_code')}:{sf.get('file')}:{sf.get('line')}" for sf in style_findings}
-    gaff_codes = {str(sf.get('rule_code', '')).lower() for sf in style_findings}
-    ast_p1_findings = [
-        f for f in ast_findings
-        if not (f.get("rule_code") or "").startswith("SEC_")
-        and not f.get("rule_name", "").startswith("[SEGURIDAD]")
-        and not (style_findings and (
-            f"{f.get('rule_code') or f.get('rule_id')}:{f.get('file')}:{f.get('line')}" in gaff_rules
-            or str(f.get("rule_code") or f.get("rule_id", "")).lower() in gaff_codes
-            or str(f.get("rule_code") or f.get("rule_id", "")).lower() in ("0x0001h", "gaff011", "gaff009", "gaff010", "gaff001", "gaff003", "gaff007")
-        ))
-    ]
     rip_lines = ["## Observaciones de Calidad y Reglas P1 (Linter AST / Ripley)"]
     if ast_p1_findings:
         rip_lines.append(f"\nSe detectaron **{len(ast_p1_findings)}** observación(es) en el código C:\n")
@@ -380,6 +347,9 @@ def write_individual_tool_reports(
     rip_path.write_text("\n".join(rip_lines) + "\n", encoding="utf-8")
     generated["ripley"] = rip_path
 
+
+def _informe_kaneda(ast_findings, generated, rni_dir) -> None:
+    """3. Auditoría de Seguridad (Sandbox / Kaneda)"""
     # 3. Auditoría de Seguridad (Sandbox / Kaneda)
     sec_findings = [f for f in ast_findings if (f.get("rule_code") or "").startswith("SEC_") or f.get("rule_name", "").startswith("[SEGURIDAD]")]
     kan_lines = ["## Auditoría de Seguridad — Sandbox / Kaneda"]
@@ -395,6 +365,9 @@ def write_individual_tool_reports(
     kan_path.write_text("\n".join(kan_lines) + "\n", encoding="utf-8")
     generated["kaneda"] = kan_path
 
+
+def _informe_spunkmeyer(analysis, ast_p1_findings, generated, rni_dir) -> None:
+    """4. Spunkmeyer (Antipatrones Didácticos)"""
     # 4. Spunkmeyer (Antipatrones Didácticos)
     spk_findings = analysis.get("spunkmeyer_findings")
     if spk_findings is None:
@@ -436,6 +409,9 @@ def write_individual_tool_reports(
     spk_path.write_text("\n".join(spk_lines) + "\n", encoding="utf-8")
     generated["spunkmeyer"] = spk_path
 
+
+def _informe_tests(cases, comp, generated, rni_dir, tests) -> None:
+    """5. Tests (Casos de prueba y Sandbox)"""
     # 5. Tests (Casos de prueba y Sandbox)
     is_project_tests = tests.get("is_project") or comp.get("is_project")
     if is_project_tests:
@@ -500,6 +476,9 @@ def write_individual_tool_reports(
         generated["tests"] = test_path
     generated["tests"] = test_path
 
+
+def _informe_valgrind(cases, generated, rni_dir, val) -> None:
+    """6. Valgrind (Auditoría de Memoria Dinámica / Heap)"""
     # 6. Valgrind (Auditoría de Memoria Dinámica / Heap)
     val_lines = ["## Auditoría de Memoria Dinámica — Valgrind"]
     if val.get("executed"):
@@ -531,6 +510,9 @@ def write_individual_tool_reports(
     val_path.write_text("\n".join(val_lines) + "\n", encoding="utf-8")
     generated["valgrind"] = val_path
 
+
+def _informe_gaff(generated, rni_dir, style_findings) -> None:
+    """7. Gaff (Linter de Estilo y Formato)"""
     # 7. Gaff (Linter de Estilo y Formato)
     gaff_lines = ["## Linter de Estilo y Formato — Gaff"]
     if style_findings:
@@ -550,6 +532,9 @@ def write_individual_tool_reports(
     gaff_path.write_text("\n".join(gaff_lines) + "\n", encoding="utf-8")
     generated["gaff"] = gaff_path
 
+
+def _informe_similitud(analysis, generated, rni_dir) -> None:
+    """8. Similitud Winnowing (similarity.md) si está disponible"""
     # 8. Similitud Winnowing (similarity.md) si está disponible
     sim_data = analysis.get("plagiarism") or analysis.get("similarity")
     if sim_data:
@@ -565,6 +550,9 @@ def write_individual_tool_reports(
         sim_path.write_text("\n".join(sim_lines) + "\n", encoding="utf-8")
         generated["similarity"] = sim_path
 
+
+def _informe_preguntas_orales(analysis, generated, rni_dir) -> None:
+    """9. Preguntas de Defensa Oral (oral_questions.md) si están disponibles"""
     # 9. Preguntas de Defensa Oral (oral_questions.md) si están disponibles
     oral_qs = analysis.get("oral_questions", [])
     if oral_qs:
@@ -581,6 +569,85 @@ def write_individual_tool_reports(
         oral_path = rni_dir / "oral_questions.md"
         oral_path.write_text("\n".join(oral_lines) + "\n", encoding="utf-8")
         generated["oral_questions"] = oral_path
+
+
+
+def write_individual_tool_reports(
+    rni_dir: Path,
+    analysis: Dict[str, Any],
+    metadata: Optional[RepoMetadata] = None,
+    guide: Optional[Any] = None,
+) -> Dict[str, Path]:
+    """Genera los informes individuales en Markdown para cada herramienta en el directorio rNi."""
+    rni_dir.mkdir(parents=True, exist_ok=True)
+    generated: Dict[str, Path] = {}
+
+    # 0. Resumen de Evaluación por Archivo (resumen.md)
+    comp = analysis.get("compilation", {})
+    files_comp = comp.get("files", {})
+    ast_findings = analysis.get("ast_findings", [])
+    style_findings = analysis.get("style_findings", [])
+    tests = analysis.get("tests", {})
+    cases = tests.get("cases", [])
+    val = analysis.get("valgrind", {})
+    binary_findings = analysis.get("binary_findings", [])
+
+    all_c_files = set(files_comp.keys())
+    for f in ast_findings:
+        if f.get("file"):
+            all_c_files.add(f.get("file"))
+    for sf in style_findings:
+        if sf.get("file"):
+            all_c_files.add(sf.get("file"))
+
+    if not all_c_files:
+        all_c_files.add("entrega_general")
+
+    # Observaciones P1 que no repiten las de gaff ni son de seguridad (las usan ripley.md y spunkmeyer.md).
+    gaff_rules = {f"{sf.get('rule_code')}:{sf.get('file')}:{sf.get('line')}" for sf in style_findings}
+    gaff_codes = {str(sf.get('rule_code', '')).lower() for sf in style_findings}
+    ast_p1_findings = [
+        f for f in ast_findings
+        if not (f.get("rule_code") or "").startswith("SEC_")
+        and not f.get("rule_name", "").startswith("[SEGURIDAD]")
+        and not (style_findings and (
+            f"{f.get('rule_code') or f.get('rule_id')}:{f.get('file')}:{f.get('line')}" in gaff_rules
+            or str(f.get("rule_code") or f.get("rule_id", "")).lower() in gaff_codes
+            or str(f.get("rule_code") or f.get("rule_id", "")).lower() in ("0x0001h", "gaff011", "gaff009", "gaff010", "gaff001", "gaff003", "gaff007")
+        ))
+    ]
+
+    _informe_resumen(all_c_files=all_c_files, analysis=analysis, ast_findings=ast_findings, binary_findings=binary_findings, cases=cases, comp=comp, files_comp=files_comp, generated=generated, rni_dir=rni_dir, style_findings=style_findings)
+
+    # 0.5. Auditoría de Archivos Binarios Prohibidos (binarios.md)
+    _informe_binarios(binary_findings=binary_findings, generated=generated, rni_dir=rni_dir)
+
+    # 1. Daedalus (Compilación)
+    _informe_daedalus(comp=comp, files_comp=files_comp, generated=generated, rni_dir=rni_dir)
+
+    # 2. Linter de Reglas P1 (AST nativo / Ripley)
+    _informe_ripley(ast_p1_findings=ast_p1_findings, generated=generated, rni_dir=rni_dir)
+
+    # 3. Auditoría de Seguridad (Sandbox / Kaneda)
+    _informe_kaneda(ast_findings=ast_findings, generated=generated, rni_dir=rni_dir)
+
+    # 4. Spunkmeyer (Antipatrones Didácticos)
+    _informe_spunkmeyer(analysis=analysis, ast_p1_findings=ast_p1_findings, generated=generated, rni_dir=rni_dir)
+
+    # 5. Tests (Casos de prueba y Sandbox)
+    _informe_tests(cases=cases, comp=comp, generated=generated, rni_dir=rni_dir, tests=tests)
+
+    # 6. Valgrind (Auditoría de Memoria Dinámica / Heap)
+    _informe_valgrind(cases=cases, generated=generated, rni_dir=rni_dir, val=val)
+
+    # 7. Gaff (Linter de Estilo y Formato)
+    _informe_gaff(generated=generated, rni_dir=rni_dir, style_findings=style_findings)
+
+    # 8. Similitud Winnowing (similarity.md) si está disponible
+    _informe_similitud(analysis=analysis, generated=generated, rni_dir=rni_dir)
+
+    # 9. Preguntas de Defensa Oral (oral_questions.md) si están disponibles
+    _informe_preguntas_orales(analysis=analysis, generated=generated, rni_dir=rni_dir)
 
     return generated
 
