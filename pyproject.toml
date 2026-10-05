@@ -33,24 +33,24 @@ dependencies = [
     "tree-sitter>=0.23.0",
     "tree-sitter-c>=0.23.0",
     # Núcleo común del ecosistema (N-ECO-14): TyperConErrores y textos en español.
-    "yutani @ git+https://github.com/INGCOM-UNRN-P1/yutani@31f79c904ac33065cc1c2b9fd34b4c513f0028d9",
+    "yutani @ git+https://github.com/INGCOM-UNRN-P1/yutani@cf49348fae40d264006fe07dee2cc9e88dd9c934",
 ]
 
 [project.optional-dependencies]
 # Herramientas del ecosistema que se usan como biblioteca (N-ECO-01). Referencias git fijadas
 # a commits publicados; sin el extra se usa el camino propio (gcc, sin sandbox de nostromo…).
 ecosistema = [
-    "daedalus @ git+https://github.com/INGCOM-UNRN-P1/daedalus@b4db9fa784380a9c70e2486e699556c30f2f3cfb",
-    "nostromo @ git+https://github.com/INGCOM-UNRN-P1/nostromo@ec62a77c6452750df644b78382e0ec6fb12a0f00",
-    "gaff @ git+https://github.com/INGCOM-UNRN-P1/gaff@204109e246024b0d56ec1b6ee860f4bbbd701705",
-    "spunkmeyer @ git+https://github.com/INGCOM-UNRN-P1/spunkmeyer@e89e4143bd43e4d626a3521125585dde4a3809a2",
-    "drake @ git+https://github.com/INGCOM-UNRN-P1/drake@f1ed14e7da78dc25bdf1fe8865806d87fe7802b0",
-    "wierzbowski @ git+https://github.com/INGCOM-UNRN-P1/wierzbowski@41528e5cae752e2e616f79f597402d2566f000eb",
+    "daedalus @ git+https://github.com/INGCOM-UNRN-P1/daedalus@18f9c3b3527d16d152d56e918160bc772ac9990c",
+    "nostromo @ git+https://github.com/INGCOM-UNRN-P1/nostromo@c4c3bfcfdf709de9f3892e503ae2f208bf166f51",
+    "gaff @ git+https://github.com/INGCOM-UNRN-P1/gaff@ec1d82aef96391d3cdc0c7552da6f8f4a513c6ce",
+    "spunkmeyer @ git+https://github.com/INGCOM-UNRN-P1/spunkmeyer@b70c5f6ba9fa7cf6b63793a7302ec0284ba825fe",
+    "drake @ git+https://github.com/INGCOM-UNRN-P1/drake@6b28fd6748cf879e537fadf0c8d398b6dfd4d0e4",
+    "wierzbowski @ git+https://github.com/INGCOM-UNRN-P1/wierzbowski@e7826a18e421b73edb9a54353736251f66f1fa7c",
 ]
 
 # Multiplexado de trabajos prácticos con las guías de deckard.
 guias = [
-    "deckard @ git+https://github.com/INGCOM-UNRN/deckard@5566e32988e073e03eb75e0d1a2a9dca76c4d8c8",
+    "deckard @ git+https://github.com/INGCOM-UNRN/deckard@2f36e12692c98ef4970cc40c5396dd1635ad14d0",
 ]
 
 [project.urls]
