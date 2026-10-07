@@ -108,3 +108,34 @@ def test_resolve_submission_revision_and_find_report(tmp_path: Path):
     encontrado = find_student_report(tmp_path, "tp01", "garcia_ana")
     assert encontrado == report_file
 
+
+
+def test_resumen_no_lista_binarios_como_fuentes_y_tests_por_suite(tmp_path):
+    """Corpus 2026: el resumen mostraba `main.o` como «Falló Compilación» y tests.md el eco de make."""
+    from dredd.core.reporter import write_individual_tool_reports
+
+    binario = {"rule_code": "0x000Fh", "file": "ejercicios/ejercicio1/main.o", "line": 1}
+    analysis = {
+        "compilation": {"success": True, "is_project": True, "compiler_used": "make_proyecto"},
+        "ast_findings": [binario, {"rule_code": "0x0001h", "file": "cadenas.c", "line": 3}],
+        "binary_findings": [binario],
+        "tests": {
+            "is_project": True,
+            "has_test_target": True,
+            "cases": [
+                {"name": "libs/cadenas", "passed": True, "sanitizer_error": ""},
+                {"name": "ejercicios/ejercicio1", "passed": False,
+                 "sanitizer_error": "[FALLO] prueba.c:7: ASSERT_INT_EQ(3, 4)"},
+            ],
+        },
+    }
+    rni = tmp_path / "i_abc1234"
+    write_individual_tool_reports(rni, analysis)
+
+    resumen = (rni / "resumen.md").read_text(encoding="utf-8")
+    assert "| `cadenas.c` |" in resumen
+    assert "main.o` |" not in resumen
+    tests_md = (rni / "tests.md").read_text(encoding="utf-8")
+    assert "**Suites aprobadas:** 1 de 2." in tests_md
+    assert "- ❌ `ejercicios/ejercicio1`" in tests_md
+    assert "ASSERT_INT_EQ(3, 4)" in tests_md

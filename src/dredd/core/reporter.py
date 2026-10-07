@@ -609,6 +609,8 @@ def write_individual_tool_reports(
     for sf in style_findings:
         if sf.get("file"):
             all_c_files.add(sf.get("file"))
+    # Los binarios (.o, .a, test_bin…) van en la fila [ARCHIVOS_BINARIOS], no como fuentes.
+    all_c_files -= {b.get("file") for b in binary_findings}
 
     if not all_c_files:
         all_c_files.add("entrega_general")
