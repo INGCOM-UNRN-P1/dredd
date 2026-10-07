@@ -136,6 +136,14 @@ ESCENARIOS: dict[str, dict[str, Any]] = {
         make_test=(2, "", "assert falló\n" * 80),
         compila_make=False,
     ),
+    "proyecto_plantilla_tp_por_suite": dict(
+        archivos={"main.c": PROGRAMA, "Makefile": "all:\ntest:\n", "libs/cadenas/Makefile": "test:\n",
+                  "libs/p1_test/Makefile": "test:\n", "ejercicios/ejercicio1/Makefile": "test:\n"},
+        kwargs=dict(tipo_entrega="proyecto"),
+        modo="proyecto",
+        checks=_checks(kaneda_enabled=False),
+        make_test=(2, "Compilando…\n", "[FALLO] prueba.c:7: ASSERT_INT_EQ(3, 4)"),
+    ),
     "proyecto_make_test_explota": dict(
         archivos={"main.c": PROGRAMA, "Makefile": "all:\n"},
         kwargs=dict(tipo_entrega="proyecto"),

@@ -721,8 +721,83 @@ def _analyze_individual_makefiles(
     }
 
 
+# Lo que se guarda de la salida de `make test`: el final, donde están la
+# aserción que falló o el error de compilación (el comienzo es el eco de make).
+_MAKE_TEST_SALIDA_MAX = 1500
+
+# Librerías de la cátedra que vienen en libs/ y no son trabajo del estudiante.
+_SUITES_DE_LA_CATEDRA = {"p1_test"}
+
+
+def _final_de_salida(texto: str, maximo: int = _MAKE_TEST_SALIDA_MAX) -> str:
+    """Los últimos `maximo` caracteres de la salida de make, marcando el recorte."""
+    texto = texto.strip()
+    if len(texto) <= maximo:
+        return texto
+    return "…\n" + texto[-maximo:]
+
+
+def _suites_del_proyecto(target_path: Path) -> List[Path]:
+    """Carpetas `libs/*` y `ejercicios/*` con Makefile propio (estructura de plantilla-TP)."""
+    suites: List[Path] = []
+    for grupo in ("libs", "ejercicios"):
+        base = target_path / grupo
+        if not base.is_dir():
+            continue
+        for carpeta in sorted(base.iterdir()):
+            if (carpeta / "Makefile").is_file() and carpeta.name not in _SUITES_DE_LA_CATEDRA:
+                suites.append(carpeta)
+    return suites
+
+
+def _make_test_por_suite(target_path: Path, suites: List[Path]) -> Tuple[List[Dict[str, Any]], str]:
+    """`make test` en cada suite: un Makefile raíz que corta en la primera falla deja sin correr el resto."""
+    try:
+        subprocess.run(
+            ["make", "-k", "-C", str(target_path), "librerias"],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=120,
+        )
+    except Exception:
+        pass
+    casos: List[Dict[str, Any]] = []
+    registro: List[str] = []
+    for suite in suites:
+        nombre = suite.relative_to(target_path).as_posix()
+        try:
+            p_suite = subprocess.run(
+                ["make", "-C", str(suite), "test"],
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=60,
+            )
+            salida = f"{p_suite.stdout}\n{p_suite.stderr}".strip()
+            aprobada = p_suite.returncode == 0
+        except subprocess.TimeoutExpired:
+            salida = "La suite superó los 60 segundos (¿un ciclo infinito o una lectura de teclado?)."
+            aprobada = False
+        except Exception as e:
+            salida = str(e)
+            aprobada = False
+        registro.append(f"=== {nombre} ===\n{salida}")
+        casos.append({
+            "name": nombre,
+            "passed": aprobada,
+            "memory_leak": False,
+            "sanitizer_error": "" if aprobada else _final_de_salida(salida),
+        })
+    return casos, "\n\n".join(registro)
+
+
 def _run_project_make_test(target_path: Path) -> Tuple[List[Dict[str, Any]], bool, bool, str]:
-    """`make test` en la raíz: (casos, test_ok, hay target test, salida)."""
+    """`make test` en la raíz: (casos, test_ok, hay target test, salida).
+
+    Si falla y el proyecto tiene la estructura de plantilla-TP, se corre cada suite
+    por separado para informar cuáles fallan y no solo la primera.
+    """
     test_cases: List[Dict[str, Any]] = []
     test_ok = True
     has_test_target = False
@@ -732,6 +807,7 @@ def _run_project_make_test(target_path: Path) -> Tuple[List[Dict[str, Any]], boo
             ["make", "-C", str(target_path), "test"],
             capture_output=True,
             text=True,
+            stdin=subprocess.DEVNULL,
             timeout=60,
         )
         out_combined = f"{p_test.stdout}\n{p_test.stderr}".strip()
@@ -749,12 +825,17 @@ def _run_project_make_test(target_path: Path) -> Tuple[List[Dict[str, Any]], boo
                 })
             else:
                 test_ok = False
-                test_cases.append({
-                    "name": "make_test",
-                    "passed": False,
-                    "memory_leak": False,
-                    "sanitizer_error": out_combined[:600],
-                })
+                suites = _suites_del_proyecto(target_path)
+                if suites:
+                    test_cases, registro = _make_test_por_suite(target_path, suites)
+                    test_output_log += f"\n\n=== make test por suite ===\n{registro}"
+                else:
+                    test_cases.append({
+                        "name": "make_test",
+                        "passed": False,
+                        "memory_leak": False,
+                        "sanitizer_error": _final_de_salida(out_combined),
+                    })
     except Exception as e:
         test_output_log = str(e)
     return test_cases, test_ok, has_test_target, test_output_log
@@ -794,7 +875,7 @@ def _analyze_project(
         "version": __version__,
         "is_project": True,
         "compilation": {
-            "success": comp_make.success and (test_ok if has_test_target else True),
+            "success": comp_make.success,
             "raw_stderr": comp_make.raw_stderr,
             "raw_stdout": getattr(comp_make, "raw_stdout", ""),
             "full_output": full_proj_log,

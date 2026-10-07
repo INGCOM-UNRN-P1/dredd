@@ -416,15 +416,25 @@ def _informe_tests(cases, comp, generated, rni_dir, tests) -> None:
     is_project_tests = tests.get("is_project") or comp.get("is_project")
     if is_project_tests:
         test_lines = ["## Pruebas del Proyecto — Makefile raíz (`make test`)"]
-        if tests.get("cases"):
-            tc = tests["cases"][0]
-            if tc.get("passed"):
+        casos_proyecto = tests.get("cases") or []
+        if casos_proyecto:
+            if all(c.get("passed") for c in casos_proyecto):
                 test_lines.append("\n✓ **Estado:** Pruebas del proyecto aprobadas con éxito (`make test`).")
             else:
                 test_lines.append("\n❌ **Estado:** Fallaron las pruebas del proyecto (`make test`).")
-                err_msg = tc.get("sanitizer_error", "")
-                if err_msg:
-                    test_lines.append(f"\n```text\n{err_msg[:1200]}\n```")
+                if len(casos_proyecto) > 1 or casos_proyecto[0].get("name") != "make_test":
+                    # Una suite por librería o ejercicio (dredd las corrió por separado).
+                    aprobadas = sum(1 for c in casos_proyecto if c.get("passed"))
+                    test_lines.append(f"\n**Suites aprobadas:** {aprobadas} de {len(casos_proyecto)}.\n")
+                    for c in casos_proyecto:
+                        marca = "✓" if c.get("passed") else "❌"
+                        test_lines.append(f"- {marca} `{c.get('name')}`")
+                for c in casos_proyecto:
+                    err_msg = c.get("sanitizer_error", "")
+                    if not c.get("passed") and err_msg:
+                        if c.get("name") != "make_test":
+                            test_lines.append(f"\n### `{c.get('name')}`")
+                        test_lines.append(f"\n```text\n{err_msg}\n```")
         elif tests.get("has_test_target") is False:
             test_lines.append("\n*El Makefile raíz no define un target 'test' automatizado.*")
         else:
