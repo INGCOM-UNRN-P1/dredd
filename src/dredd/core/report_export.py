@@ -74,8 +74,8 @@ def parse_markdown(md_text: str) -> List[Block]:
 
         if _TABLE_ROW.match(line):
             rows: List[List[str]] = []
-            while i < len(lines) and _TABLE_ROW.match(lines[i]):
-                cells = [c.strip() for c in _TABLE_ROW.match(lines[i]).group(1).split("|")]
+            while i < len(lines) and (m_fila := _TABLE_ROW.match(lines[i])):
+                cells = [c.strip() for c in m_fila.group(1).split("|")]
                 if not all(re.fullmatch(r":?-{2,}:?", c) for c in cells):
                     rows.append(cells)
                 i += 1
@@ -199,7 +199,7 @@ class _PdfDoc:
     def __init__(self, title: str) -> None:
         self.title = title
         self.pages: List[List[str]] = [[]]
-        self.y = PAGE_H - MARGIN
+        self.y: float = PAGE_H - MARGIN
 
     def _newpage(self) -> None:
         self.pages.append([])

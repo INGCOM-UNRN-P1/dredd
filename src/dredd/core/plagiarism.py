@@ -157,7 +157,7 @@ class PlagiarismDetector:
             except Exception:
                 pass
         if plantilla is not None and self._stripper is None:
-            self.__init__(k=self.k, w=self.w, threshold=self.threshold, plantilla=plantilla)
+            self.__init__(k=self.k, w=self.w, threshold=self.threshold, plantilla=plantilla)  # type: ignore[misc]
         thresh = threshold if threshold is not None else self.threshold
         if not submissions_dir.is_dir():
             return []

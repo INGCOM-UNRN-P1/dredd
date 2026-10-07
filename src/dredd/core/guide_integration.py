@@ -252,8 +252,8 @@ def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None) ->
                 tipo_entrega=ej_tipo,
                 familia=familia,
                 rol_familia=rol_familia,
-                dependencias=dependencias if isinstance(dependencias, list) else [dependencias],
-                archivos_requeridos=archivos_req if isinstance(archivos_req, list) else [archivos_req],
+                dependencias=dependencias if isinstance(dependencias, list) else ([dependencias] if dependencias else []),
+                archivos_requeridos=archivos_req if isinstance(archivos_req, list) else ([archivos_req] if archivos_req else []),
                 enunciado=ex_enunciado,
                 pistas=ex_pistas,
             )
@@ -295,7 +295,7 @@ def _parse_guide_from_exercise_dirs(guide_dir: Path, exercise_dirs: List[Path]) 
         titulo = ed.name
         tema = "general"
         bloom = 1
-        tags = []
+        tags: List[str] = []
         starter = ""
         solucion = ""
         ej_tipo = "archivos_individuales"

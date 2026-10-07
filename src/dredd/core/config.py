@@ -358,9 +358,9 @@ class DreddConfig:
     def get_delivery_mode(
         self,
         activity_slug: Optional[str] = None,
-        guide_mode: Optional[str] = None,
+        guide_mode: Optional[Any] = None,
         target_path: Optional[Path] = None,
-        cli_override: Optional[str] = None,
+        cli_override: Optional[Any] = None,
     ) -> str:
         """Determina el modo de entrega efectivo ('archivos_individuales', 'makefiles_individuales' o 'proyecto')
         aplicando la jerarquía de prioridad:
@@ -372,12 +372,12 @@ class DreddConfig:
            - Makefile único en la raíz -> 'proyecto'
         5. Fallback por defecto ('archivos_individuales')
         """
-        if hasattr(cli_override, "default"):
+        if cli_override is not None and hasattr(cli_override, "default"):
             cli_override = cli_override.default
         if not isinstance(cli_override, str):
             cli_override = None
 
-        if hasattr(guide_mode, "default"):
+        if guide_mode is not None and hasattr(guide_mode, "default"):
             guide_mode = guide_mode.default
         if not isinstance(guide_mode, str):
             guide_mode = None

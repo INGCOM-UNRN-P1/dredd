@@ -1,7 +1,7 @@
 """Evaluación de entregas: eval, evaluate run/clean, rerun y sus variantes."""
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 import typer
 from rich.table import Table
 from rich.panel import Panel
@@ -131,6 +131,8 @@ def ejecutar_evaluacion(
             continue
 
         repo_sub = repo_path / "repo"
+        # Revisión: hash corto (repo git) o número de carpeta rN.
+        all_revs: List[Tuple[Union[str, int], Path]]
         if repo_sub.is_dir():
             meta = get_repo_metadata(repo_sub)
             shorthash = meta.revision or meta.full_hash[:7] or "latest"
@@ -144,7 +146,7 @@ def ejecutar_evaluacion(
         else:
             from dredd.core.reformat import reformat_submission_to_rn_f, find_existing_revision_folders
             reformat_submission_to_rn_f(repo_path)
-            all_revs = find_existing_revision_folders(repo_path)
+            all_revs = list(find_existing_revision_folders(repo_path))
             if not all_revs:
                 all_revs = [(1, repo_path)]
             is_github_repo_mode = False

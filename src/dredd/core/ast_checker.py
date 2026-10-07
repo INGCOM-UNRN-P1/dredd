@@ -19,8 +19,8 @@ from tree_sitter import Language, Parser, Node, Query
 
 try:
     from tree_sitter import QueryCursor
-except ImportError:
-    QueryCursor = None
+except ImportError:  # tree-sitter < 0.25: las capturas salen de Query
+    QueryCursor = None  # type: ignore[misc,assignment]
 
 
 def _get_line_starts(content_bytes: bytes) -> List[int]:
@@ -111,7 +111,7 @@ def _run_query_captures(query: Query, root_node: Node) -> Dict[str, List[Node]]:
         if QueryCursor is not None:
             raw = QueryCursor(query).captures(root_node)
         else:
-            raw = query.captures(root_node)
+            raw = query.captures(root_node)  # type: ignore[attr-defined]
     except Exception:
         return {}
 
@@ -136,7 +136,7 @@ def _find_identifier(node: Optional[Node]) -> Optional[str]:
         while stack:
             curr = stack.pop()
             if curr.type in ("identifier", "type_identifier", "field_identifier"):
-                return curr.text.decode("utf-8", errors="replace")
+                return (curr.text or b"").decode("utf-8", errors="replace")
             if curr.type == "function_declarator":
                 continue
             for child in reversed(curr.children):

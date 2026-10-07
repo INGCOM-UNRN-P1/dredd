@@ -69,7 +69,7 @@ def semillas_por_espec(spec: Optional[dict]) -> List[str]:
         semillas += ["", " ".join(["7"] * 1), " ".join(["42"] * n),
                      " ".join(["-5", "0", "5"]),
                      " ".join(str(2_147_483_647) for _ in range(min(n, 8)))]
-    extra = espec.get("semillas_extra") or []
+    extra = list(espec.get("semillas_extra") or [])
     semillas.extend(str(e) for e in extra)
     return semillas
 

@@ -53,7 +53,7 @@ class BoilerStripper:
         """
         self.ventanas_minimas = max(1, ventanas_minimas)
         self._frases: set[frozenset] = set()  # n-gramas de línea de la plantilla
-        self._listado: set[tuple] = set()
+        self._listado: set[str] = set()
 
     def cargar_plantilla(self, ruta: Path | str) -> int:
         """Carga una plantilla (archivo o directorio .c/.h) y devuelve las
