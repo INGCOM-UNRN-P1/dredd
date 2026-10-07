@@ -116,7 +116,7 @@ def test_comando_bwrap_no_monta_la_raiz(tmp_path: Path):
     binario = tmp_path / "prog"
     binario.write_text("")
     cmd = sandbox._comando_bwrap("bwrap", [str(binario)], str(tmp_path), ["--unshare-all"])
-    pares = list(zip(cmd, cmd[1:], cmd[2:]))
+    pares = list(zip(cmd, cmd[1:], cmd[2:], strict=False))
     assert ("--ro-bind", "/", "/") not in pares
     assert ("--bind", "/", "/") not in pares
     # el workspace se monta después de --tmpfs /tmp para no quedar oculto

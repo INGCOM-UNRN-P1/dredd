@@ -146,7 +146,7 @@ def extract_archive_payload(
                 members = [m for m in tf.getmembers() if m.isfile()]
                 names = [m.name.replace("\\", "/") for m in members]
                 strip_prefix = _get_common_root_prefix(names)
-                for m, norm_name in zip(members, names):
+                for m, norm_name in zip(members, names, strict=False):
                     rel = (
                         norm_name[len(strip_prefix):]
                         if strip_prefix and norm_name.startswith(strip_prefix)

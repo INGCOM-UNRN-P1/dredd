@@ -39,7 +39,7 @@ def cmd_github_clone(
             console.print(f"  Autor: [dim]{meta.author}[/dim] | Mensaje: [dim]{meta.commit_message}[/dim]")
     except Exception as e:
         console.print(f"[bold red]Error al clonar entrega de GitHub:[/bold red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
 
 def cmd_comment(
@@ -63,7 +63,7 @@ def cmd_comment(
             open_pr_in_browser(org, student, pr_number=pr_number)
     except Exception as e:
         console.print(f"[bold red]Error al publicar comentario:[/bold red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
 
 def cmd_pr_fix(
@@ -111,7 +111,7 @@ def cmd_pr_fix(
             console.print("[bold yellow]⚠ El PR no pudo crearse automáticamente.[/bold yellow]")
     except Exception as e:
         console.print(f"[bold red]Error en pr-fix:[/bold red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
 
 def cmd_audit_git(

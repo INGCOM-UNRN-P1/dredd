@@ -61,7 +61,7 @@ def cmd_export(
         console.print(f"  · Dashboard de cohorte: [cyan]{dash_file}[/cyan]\n")
     except Exception as e:
         console.print(f"[bold red]Error durante la exportación:[/bold red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
 
 def cmd_export_report(
@@ -78,7 +78,7 @@ def cmd_export_report(
         console.print(f"[bold green]✓ Informe exportado con éxito ({fmt.upper()}):[/bold green] [cyan]{out_file}[/cyan]")
     except Exception as e:
         console.print(f"[bold red]Error al exportar informe:[/bold red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
 
 def cmd_moodle_export(
@@ -94,7 +94,7 @@ def cmd_moodle_export(
         console.print(f"\n[bold green]✓ Planilla generada en: {csv_file}[/bold green]\n")
     except Exception as e:
         console.print(f"[bold red]Error al exportar planilla Moodle:[/bold red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
 
 def cmd_export_guarani(
@@ -151,7 +151,7 @@ def cmd_dashboard(
             entregas_path=entregas,
         )
     except OSError:
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
 
 def cmd_export_feedback(

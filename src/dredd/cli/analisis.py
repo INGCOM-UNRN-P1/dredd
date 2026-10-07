@@ -131,7 +131,7 @@ def fuzz_gen(
                                       segundos_fuzz=segundos)
     except RuntimeError as e:
         console.print(f"[bold red]✗ {e}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     tabla = Table(title=f"Testcases generados (modo: {resultado.modo})")
     tabla.add_column("Entrada", style="cyan")
@@ -216,7 +216,7 @@ def cmd_multiplex(
             return
         except Exception as e:
             console.print(f"[bold red]Error en multiplex:[/bold red] {e}")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from e
 
     console.print("[bold red]Deckard no está disponible en PATH ni en el entorno hermano.[/bold red]")
     console.print("  ↳ Instalar o enlazar Deckard: [cyan]pip install -e ../deckard[/cyan]")
