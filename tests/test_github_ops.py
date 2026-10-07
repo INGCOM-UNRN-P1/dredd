@@ -310,6 +310,7 @@ def test_cli_github_pr_fix_invocation(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(gh_api, "is_gh_installed", lambda: True)
 
     gh_cmds = []
+    pushes = []
     original_run = subprocess.run
 
     def mock_run(cmd, *args, **kwargs):
@@ -320,6 +321,10 @@ def test_cli_github_pr_fix_invocation(tmp_path: Path, monkeypatch):
                 stdout = "https://github.com/INGCOM-UNRN-P1/TP0-Enehuen/pull/1\n"
                 stderr = ""
             return MockProc()
+        # La dirección es una URL de GitHub: el push no puede salir a la red (haría push -f a un repo real).
+        if isinstance(cmd, list) and cmd[:1] == ["git"] and "push" in cmd:
+            pushes.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         return original_run(cmd, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", mock_run)
@@ -337,6 +342,7 @@ def test_cli_github_pr_fix_invocation(tmp_path: Path, monkeypatch):
     assert "--repo" in call_args
     idx = call_args.index("--repo")
     assert call_args[idx + 1] == "INGCOM-UNRN-P1/TP0-Enehuen"
+    assert len(pushes) == 1 and pushes[0][-2:] == ["origin", "correccion"]
 
 
 def test_cli_github_pr_fix_auto_clone_if_not_present(tmp_path: Path, monkeypatch):
