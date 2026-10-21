@@ -129,12 +129,19 @@ Clona/actualiza el repositorio o evalúa entregas locales, ejecuta el análisis 
 | `--clean`, `-c` | `<class 'bool'>` | `False` | Limpia directorios de evaluación (rNi) e informes previos antes de volver a evaluar. |
 | `--force`, `-f` | `<class 'bool'>` | `False` | Fuerza la re-evaluación completa eliminando resultados previos de las carpetas de estudiantes. |
 | `--json` | `<class 'bool'>` | `False` | Emite el resultado estructurado de la evaluación en formato JSON (máquina a máquina). |
+| `--failed-only` | `<class 'bool'>` | `False` | Evaluar sólo las entregas cuya última revisión no terminó, no compiló o falló alguna prueba. |
+| `--resume` | `<class 'bool'>` | `False` | Retomar una corrida interrumpida: saltear las revisiones que ya quedaron completas (auditoria.json). |
 | `--workspace`, `-w` | `<class 'pathlib._local.Path'>` | `.` | Directorio raíz del workspace. |
 
 #### Ejemplo de Invocación
 ```bash
 dredd eval <exercise>
 ```
+
+Cada revisión deja en `rNi/auditoria.json` su `estado` (`en_curso` → `completa`, o `error`) y un
+`resultado` con la compilación y las pruebas: es el cursor de las corridas masivas. Si una corrida
+de todo el curso se corta, `dredd eval tp01 --all --resume` retoma donde quedó sin volver a evaluar
+lo terminado; `--failed-only` vuelve a correr sólo las entregas que fallaron (o no terminaron).
 
 ### `dredd clean-eval`
 

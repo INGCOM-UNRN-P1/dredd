@@ -106,7 +106,15 @@ def is_submission_failed(
     workspace_dir: Optional[Path] = None,
 ) -> bool:
     """Determina si la entrega de un estudiante está desaprobada, falló en compilación/tests o requiere re-evaluación."""
+    from dredd.core.auditoria import fallida, ultima_revision
     from dredd.core.db import DatabaseManager
+
+    # 0. El cursor de auditoria.json de la última revisión evaluada (si es de esta versión de dredd)
+    ultima = ultima_revision(student_dir)
+    if ultima is not None:
+        veredicto = fallida(ultima)
+        if veredicto is not None:
+            return veredicto
 
     # 1. Chequear SQLite .metadata.db en la carpeta del estudiante o en la carpeta padre
     for db_cand in [student_dir / ".metadata.db", student_dir.parent / ".metadata.db"]:
@@ -985,15 +993,17 @@ def generate_student_report(
     write_individual_tool_reports(rni_dir, analysis, metadata=metadata, guide=guide)
 
     # 2b. Hallazgos en la taxonomía común, «Para repasar» con enlaces al apunte y registro de
-    # auditoría (con qué versión de cada herramienta se corrigió, para reclamos).
-    from dredd.core.auditoria import registrar
+    # auditoría (con qué versión de cada herramienta se corrigió, para reclamos). El registro es
+    # también el cursor de las corridas masivas: queda `en_curso` hasta que el informe se escribe.
+    from dredd.core.auditoria import marcar, registrar, resultado_del_analisis
     from dredd.core.cohorte import escribir as escribir_hallazgos
     escribir_hallazgos(rni_dir, analysis)
     registrar(rni_dir, alumno=student, actividad=exercise, revision=rev_tag,
-              commit=(metadata.full_hash or None) if metadata else None)
+              commit=(metadata.full_hash or None) if metadata else None,
+              resultado=resultado_del_analisis(analysis))
 
     # 3. Generar informe consolidado a partir de rNi/
-    return generate_consolidated_report_from_rni(
+    informe = generate_consolidated_report_from_rni(
         rni_dir=rni_dir,
         exercise=exercise,
         student=student,
@@ -1004,6 +1014,8 @@ def generate_student_report(
         guide=guide,
         analysis=analysis,
     )
+    marcar(rni_dir, "completa")
+    return informe
 
 
 def generate_personalized_feedback_markdown(

@@ -24,8 +24,15 @@ def ejecutar_evaluacion(
     workspace_dir: Optional[Path] = None,
     baseline: Optional[Path] = None,
     json_output: bool = False,
+    resume: bool = False,
 ) -> None:
-    """Ejecuta el ciclo de evaluación sobre una o varias entregas de estudiantes."""
+    """Ejecuta el ciclo de evaluación sobre una o varias entregas de estudiantes.
+
+    `failed_only` evalúa sólo las entregas cuya última revisión no terminó, no compiló o falló
+    alguna prueba; `resume` saltea las revisiones que ya quedaron completas (el cursor es el
+    `auditoria.json` de cada `rNi/`), para retomar una corrida masiva interrumpida.
+    """
+    from dredd.core import auditoria
     from dredd.core.reporter import is_submission_failed
 
     exercise = _unwrap_cli_value(exercise, "")
@@ -38,6 +45,7 @@ def ejecutar_evaluacion(
     tipo_entrega = _unwrap_cli_value(tipo_entrega, None)
     dry_run = bool(_unwrap_cli_value(dry_run, False))
     failed_only = bool(_unwrap_cli_value(failed_only, False))
+    resume = bool(_unwrap_cli_value(resume, False))
     baseline = _unwrap_cli_value(baseline, None)
     if baseline is not None and not isinstance(baseline, Path):
         baseline = Path(baseline)
@@ -62,6 +70,10 @@ def ejecutar_evaluacion(
 
     target_students = []
     if student:
+        if failed_only and (submissions_dir / student).is_dir() and not is_submission_failed(
+                submissions_dir / student, exercise_slug, ws_dir):
+            console.print(f"[bold green]✓ La entrega de {student} está aprobada y sin fallos. Nada para re-evaluar.[/bold green]")
+            return
         target_students.append(student)
     elif all_students:
         if not submissions_dir.is_dir():
@@ -111,6 +123,7 @@ def ejecutar_evaluacion(
     table.add_column("Informe", style="green")
 
     json_results: List[Dict[str, Any]] = []
+    reanudadas = 0
 
     for s_name in target_students:
         if not json_output:
@@ -161,6 +174,17 @@ def ejecutar_evaluacion(
                 rev_str = f"r{rev_identifier}"
                 intermediate_dir = repo_path / f"r{rev_identifier}i"
                 report_file = repo_path / f"{s_name}_{rev_str}.md"
+
+            if resume and report_file.is_file():
+                if auditoria.completa(intermediate_dir, commit=get_repo_metadata(r_path).full_hash or None):
+                    reanudadas += 1
+                    if not json_output:
+                        table.add_row(f"{s_name} [{rev_str}]" if len(all_revs) > 1 else s_name,
+                                      "—", "—", "—", "[dim]ya evaluada (--resume)[/dim]")
+                    else:
+                        json_results.append({"student": s_name, "revision": rev_str, "resumed": True,
+                                             "report_file": str(report_file)})
+                    continue
 
             try:
                 meta = get_repo_metadata(r_path)
@@ -215,6 +239,13 @@ def ejecutar_evaluacion(
             except Exception as e:
                 import traceback
                 error_trace = traceback.format_exc()
+                # Queda en el cursor: `--failed-only` la vuelve a tomar y `--resume` no la saltea.
+                try:
+                    auditoria.registrar(intermediate_dir, alumno=s_name, actividad=exercise_slug, revision=rev_str,
+                                        estado="error",
+                                        error=str(e))
+                except OSError:
+                    pass
                 if not json_output:
                     console.print(f"  [bold red]Error fatal durante la evaluación de {s_name} ({rev_str}):[/bold red] {e}")
                     console.print(f"[dim]{error_trace.strip()}[/dim]")
@@ -237,11 +268,14 @@ def ejecutar_evaluacion(
         print(json.dumps({
             "exercise": exercise_slug,
             "total_students": len(json_results),
+            "resumed": reanudadas,
             "results": json_results,
         }, indent=2, ensure_ascii=False))
     else:
         console.print("\n")
         console.print(table)
+        if reanudadas:
+            console.print(f"[dim]--resume: {reanudadas} revisión(es) ya evaluada(s) no se volvieron a correr.[/dim]")
         console.print("\n[dim]Para enviar los comentarios a los PRs correspondientes, ejecute: dredd github comment <ejercicio> <estudiante>[/dim]\n")
 
 
@@ -286,6 +320,16 @@ def cmd_eval(
         "--json",
         help="Emite el resultado estructurado de la evaluación en formato JSON (máquina a máquina).",
     ),
+    failed_only: bool = typer.Option(
+        False,
+        "--failed-only",
+        help="Evaluar sólo las entregas cuya última revisión no terminó, no compiló o falló alguna prueba.",
+    ),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        help="Retomar una corrida interrumpida: saltear las revisiones que ya quedaron completas (auditoria.json).",
+    ),
     workspace: Path = typer.Option(
         Path("."),
         "--workspace",
@@ -322,6 +366,8 @@ def cmd_eval(
         baseline=baseline,
         json_output=json_output,
         workspace_dir=workspace,
+        failed_only=failed_only,
+        resume=resume,
     )
 
 
@@ -476,6 +522,16 @@ def cmd_evaluate_run(
         "-f",
         help="Fuerza la re-evaluación completa eliminando resultados previos de las carpetas de estudiantes.",
     ),
+    failed_only: bool = typer.Option(
+        False,
+        "--failed-only",
+        help="Evaluar sólo las entregas cuya última revisión no terminó, no compiló o falló alguna prueba.",
+    ),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        help="Retomar una corrida interrumpida: saltear las revisiones que ya quedaron completas (auditoria.json).",
+    ),
 ) -> None:
     """Clona/actualiza el repositorio o evalúa entregas locales, ejecuta el análisis con Ripley y genera el informe Markdown."""
     if clean or force:
@@ -494,6 +550,8 @@ def cmd_evaluate_run(
         template_dir=template_dir,
         tipo_entrega=tipo_entrega,
         dry_run=dry_run,
+        failed_only=failed_only,
+        resume=resume,
     )
 
 

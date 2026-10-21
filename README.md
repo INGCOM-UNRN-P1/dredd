@@ -154,6 +154,16 @@ Re-ejecuta evaluaciones sobre entregas previas sin repetir descargas o clones in
 dredd rerun tp01 --failed-only --dry-run
 ```
 
+Las corridas masivas se pueden retomar: cada revisión deja en `rNi/auditoria.json` su estado
+(`en_curso`, `completa` o `error`) y el resultado de la compilación y las pruebas. Si la corrida se
+corta, `--resume` sigue donde quedó sin reevaluar lo terminado; `--failed-only` toma sólo las
+entregas que fallaron o no terminaron:
+
+```bash
+dredd eval tp01 --all --resume
+dredd eval tp01 --all --failed-only
+```
+
 #### Devolución con enlaces y errores de la cohorte (`dredd cluster-errors`)
 Cada evaluación deja en `rNi/` un `hallazgos.json` con lo encontrado en la forma común del
 ecosistema (`yutani.hallazgos`) y agrega al informe del estudiante la sección **Para repasar**:
