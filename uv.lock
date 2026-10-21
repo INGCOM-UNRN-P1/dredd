@@ -275,6 +275,7 @@ ecosistema = [
     { name = "gaff" },
     { name = "nostromo" },
     { name = "spunkmeyer" },
+    { name = "weyl" },
     { name = "wierzbowski" },
 ]
 guias = [
@@ -302,6 +303,7 @@ requires-dist = [
     { name = "tree-sitter", specifier = ">=0.23.0" },
     { name = "tree-sitter-c", specifier = ">=0.23.0" },
     { name = "typer", specifier = ">=0.12.0" },
+    { name = "weyl", marker = "extra == 'ecosistema'", git = "https://github.com/INGCOM-UNRN-P1/weyl?rev=15f4aee7ad7d60918d2bf85bc144b8a545e106fc" },
     { name = "wierzbowski", marker = "extra == 'ecosistema'", git = "https://github.com/INGCOM-UNRN-P1/wierzbowski?rev=e7826a18e421b73edb9a54353736251f66f1fa7c" },
     { name = "yutani", git = "https://github.com/INGCOM-UNRN-P1/yutani?rev=cf49348fae40d264006fe07dee2cc9e88dd9c934" },
 ]
@@ -1067,6 +1069,17 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d5/a0/8fd707bcb776a7be556bad06a2ea5fb9bd519df78ef8e26f70ccf0f38bff/webencodings-0.6.1.tar.gz", hash = "sha256:565f9ad031c702dae404e27a099e3e09186a3ab1b9520f06d215502b651fd910", size = 15001, upload-time = "2026-08-15T14:22:57.549Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/77/c6/040cbc72480d789a5f40d63fb484d3106554c4dfa2d2b70ad5022057750f/webencodings-0.6.1-py3-none-any.whl", hash = "sha256:7fab6269c8bf237c657876b52058ccb182e861518d1c695c1a9aaa8c1c105d5b", size = 8745, upload-time = "2026-08-15T14:22:56.31Z" },
+]
+
+[[package]]
+name = "weyl"
+version = "0.2.0"
+source = { git = "https://github.com/INGCOM-UNRN-P1/weyl?rev=15f4aee7ad7d60918d2bf85bc144b8a545e106fc#15f4aee7ad7d60918d2bf85bc144b8a545e106fc" }
+dependencies = [
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "typer" },
+    { name = "yutani" },
 ]
 
 [[package]]

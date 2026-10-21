@@ -2,7 +2,7 @@
 
 from pathlib import Path
 import json
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -289,11 +289,27 @@ def cmd_cluster_errors(
     raiz: Path = typer.Argument(Path("."), exists=True, file_okay=False, help="Directorio con los informes del curso (busca rNi/hallazgos.json)."),
     top: int = typer.Option(15, "--top", "-n", help="Cuántos errores mostrar."),
     json_output: bool = typer.Option(False, "--json", help="Salida en formato JSON."),
+    con_similitud: bool = typer.Option(False, "--similitud", help="Agrupar además las entregas por similitud estructural (weyl similarity: mismo programa salvo nombres, comentarios u orden)."),
+    umbral: float = typer.Option(90.0, "--umbral", min=0.0, max=100.0, help="Similitud (%) a partir de la cual dos entregas van al mismo grupo."),
+    plantilla: Optional[Path] = typer.Option(None, "--plantilla", exists=True, help="Código de la cátedra (plantilla) a descontar antes de comparar."),
+    informe: Optional[Path] = typer.Option(None, "--informe", help="Escribir el informe docente de similitud en Markdown (grupos y matriz, sin código)."),
 ) -> None:
-    """Errores y temas más frecuentes de la cohorte: cuántos estudiantes distintos tuvieron cada uno."""
-    from dredd.core.cohorte import agrupar_cohorte
+    """Errores y temas más frecuentes de la cohorte: cuántos estudiantes distintos tuvieron cada uno.
+
+    Con `--similitud`, además, los grupos de entregas estructuralmente equivalentes y su matriz de
+    similitud (sin mostrar código).
+    """
+    from dredd.core.cohorte import agrupar_cohorte, ultimas_revisiones
 
     datos = agrupar_cohorte(raiz)
+    if con_similitud or informe:
+        from dredd.core.similitud import agrupar, fuentes_de_revision, informe_markdown
+
+        entregas = {alumno.name: fuentes_de_revision(archivo.parent) for alumno, archivo in ultimas_revisiones(raiz).items()}
+        datos["similitud"] = agrupar(entregas, umbral=umbral, plantilla=plantilla)
+        if informe:
+            informe.parent.mkdir(parents=True, exist_ok=True)
+            informe.write_text(informe_markdown(datos["similitud"]), encoding="utf-8")
     if json_output:
         print(json.dumps(datos, indent=2, ensure_ascii=False))
         return
@@ -312,6 +328,24 @@ def cmd_cluster_errors(
     for e in datos["errores"][:top]:
         errores.add_row(e["id"], str(e["alumnos"]), f"{e['porcentaje']:g}", e["ejemplo"][:70])
     console.print(errores)
+    if "similitud" in datos:
+        _mostrar_similitud(datos["similitud"], informe)
+
+
+def _mostrar_similitud(sim: Dict[str, Any], informe: Optional[Path]) -> None:
+    tabla = Table(title=f"Entregas estructuralmente equivalentes (≥ {sim['umbral_pct']:g} %, normalización de {sim['motor']})")
+    for columna in ("Grupo", "Entregas", "Similitud %"):
+        tabla.add_column(columna)
+    for i, g in enumerate(sim["grupos"], 1):
+        tabla.add_row(str(i), ", ".join(g["alumnos"]), f"{g['similitud_min']:g}–{g['similitud_max']:g}")
+    if sim["grupos"]:
+        console.print(tabla)
+    else:
+        console.print(f"[green]Ninguna entrega supera el {sim['umbral_pct']:g} % de similitud estructural.[/green]")
+    if sim["motor"] != "weyl":
+        console.print("[dim]weyl no está instalado: se comparó con los tokens de dredd (instalá el extra «ecosistema»).[/dim]")
+    if informe:
+        console.print(f"[dim]Informe con la matriz de cada grupo: {informe}[/dim]")
 
 
 def cmd_audit_versions(

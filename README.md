@@ -175,6 +175,17 @@ errores y qué temas tuvo más gente: lo que conviene reforzar en clase.
 dredd cluster-errors informes/tp01 --top 10
 ```
 
+Con `--similitud` agrupa además las entregas que son el mismo programa salvo nombres,
+comentarios, formato, prototipos u orden de las funciones (la medida de `weyl similarity`, con el
+árbol sintáctico de tree-sitter): cada definición se normaliza por alfa-equivalencia y se compara.
+`--informe` escribe el informe docente con la matriz de similitud de cada grupo, sin código de las
+entregas; `--plantilla` descuenta el código que dio la cátedra. La normalización de weyl viene con
+el extra `ecosistema`; sin él se usan los tokens del detector de plagio de dredd.
+
+```bash
+dredd cluster-errors informes/tp01 --similitud --umbral 90 --plantilla tp01/plantilla.c --informe similitud.md
+```
+
 #### Registro de auditoría para reclamos (`dredd audit-versions`)
 Junto a cada revisión queda `auditoria.json`: fecha, commit evaluado y versión de dredd, de cada
 satélite instalado y de gcc. `audit-versions` los lista y marca las entregas corregidas con

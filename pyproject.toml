@@ -46,6 +46,8 @@ ecosistema = [
     "spunkmeyer @ git+https://github.com/INGCOM-UNRN-P1/spunkmeyer@b70c5f6ba9fa7cf6b63793a7302ec0284ba825fe",
     "drake @ git+https://github.com/INGCOM-UNRN-P1/drake@6b28fd6748cf879e537fadf0c8d398b6dfd4d0e4",
     "wierzbowski @ git+https://github.com/INGCOM-UNRN-P1/wierzbowski@e7826a18e421b73edb9a54353736251f66f1fa7c",
+    # Normalización de weyl (alfa-equivalencia) para `cluster-errors --similitud`.
+    "weyl @ git+https://github.com/INGCOM-UNRN-P1/weyl@15f4aee7ad7d60918d2bf85bc144b8a545e106fc",
 ]
 
 # Multiplexado de trabajos prácticos con las guías de deckard.

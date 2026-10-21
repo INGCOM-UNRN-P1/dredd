@@ -85,15 +85,21 @@ def escribir(rni_dir: Path, analysis: Dict[str, Any]) -> List[Dict[str, Any]]:
     return hallazgos
 
 
-def agrupar_cohorte(raiz: Path) -> Dict[str, Any]:
-    """Errores por cohorte: cuántos estudiantes distintos tuvieron cada error y cada tema. De cada
-    estudiante cuenta su última revisión (el `rNi` más alto)."""
+def ultimas_revisiones(raiz: Path) -> Dict[Path, Path]:
+    """Por directorio de estudiante, el `hallazgos.json` de su última revisión (el `rNi` más alto)."""
     ultima: Dict[Path, Path] = {}
     for archivo in Path(raiz).rglob(ARCHIVO):
         alumno = archivo.parent.parent
         actual = ultima.get(alumno)
         if actual is None or _numero(archivo.parent.name) > _numero(actual.parent.name):
             ultima[alumno] = archivo
+    return ultima
+
+
+def agrupar_cohorte(raiz: Path) -> Dict[str, Any]:
+    """Errores por cohorte: cuántos estudiantes distintos tuvieron cada error y cada tema. De cada
+    estudiante cuenta su última revisión (el `rNi` más alto)."""
+    ultima = ultimas_revisiones(raiz)
     por_id: Dict[str, set] = defaultdict(set)
     por_categoria: Dict[str, set] = defaultdict(set)
     info: Dict[str, Dict[str, Any]] = {}
