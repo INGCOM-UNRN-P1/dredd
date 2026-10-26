@@ -676,8 +676,10 @@ def _collect_ast_findings(target_path: Path, checks: Any, uncompleted_set: Set[s
             if proc.returncode in (0, 1) and proc.stdout.strip():
                 data = json.loads(proc.stdout)
                 if isinstance(data.get("hallazgos"), list):
+                    # Sin la biblioteca de la cátedra (libs/p1_test), como en gaff y spunkmeyer.
                     return [_hallazgo_de_ripley(h) for h in data["hallazgos"]
-                            if not _in_uncompleted_exercise(Path(str(h.get("archivo") or "")), uncompleted_set)]
+                            if not _in_uncompleted_exercise(Path(str(h.get("archivo") or "")), uncompleted_set)
+                            and not _is_vendor_or_framework(Path(str(h.get("archivo") or "")))]
         except Exception:
             pass
 

@@ -190,3 +190,23 @@ def test_estilo_usa_el_cli_de_gaff_con_rutas_relativas(tmp_path: Path, monkeypat
     hallazgos, _ = ripley_client.audit_style_with_gaff(tmp_path)
     assert [h["file"] for h in hallazgos] == ["ejercicios/ej1/main.c", "ejercicios/ej2/main.c"]
     assert llamadas == [(["/usr/bin/gaff", "check", "-r", ".", "--json"], str(tmp_path))]
+
+
+def test_hallazgos_de_ripley_sin_la_biblioteca_de_la_catedra(tmp_path: Path, monkeypatch):
+    import json
+    import subprocess
+
+    from dredd.core import ripley_client
+    from dredd.core.config import ToolChecksConfig
+
+    salida = {"hallazgos": [
+        {"codigo": "0x7001h", "mensaje": "m", "archivo": "ejercicios/ej1/main.c", "linea": 3, "herramienta": "antipatterns"},
+        {"codigo": "0x7001h", "mensaje": "m", "archivo": "libs/p1_test/include/p1_arrays.h", "linea": 9,
+         "herramienta": "antipatterns"},
+    ]}
+    monkeypatch.setattr(ripley_client, "resolve_sibling_cli", lambda nombre: "/usr/bin/ripley")
+    monkeypatch.setattr(ripley_client.subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, json.dumps(salida), ""))
+    checks = ToolChecksConfig.get_strict_preset()
+    hallazgos = ripley_client._collect_ast_findings(tmp_path, checks, set())
+    assert [h["file"] for h in hallazgos] == ["ejercicios/ej1/main.c"]
