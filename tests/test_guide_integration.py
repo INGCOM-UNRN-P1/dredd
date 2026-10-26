@@ -332,3 +332,41 @@ def test_reporter_does_not_write_enunciado_markdown(tmp_path: Path):
     )
     assert "Consigna Global del TP1" not in rep_content
     assert "Origen de consigna" not in rep_content
+
+
+def test_ejercicio_sin_ripkg_se_completa_desde_el_banco_de_deckard(tmp_path: Path):
+    """F-05: con workspace.deckard_bank_dir, un ejercicio de la guía sin .ripkg sale del banco."""
+    from dredd.core.config import load_dredd_config, validate_workspace
+    from dredd.core.guide_integration import load_activity_guide
+
+    banco = tmp_path / "banco" / "contador-digitos"
+    (banco / "tests").mkdir(parents=True)
+    (banco / "ejercicio.yaml").write_text(
+        "id: contador-digitos\ntitulo: Contador de Dígitos\ntema: aritmetica\nbloom: 3\npistas:\n- El 0 tiene 1 dígito.\n",
+        encoding="utf-8")
+    (banco / "solucion.c").write_text("int contar(int n) { return n; }\n", encoding="utf-8")
+    (banco / "enunciado.md").write_text("Contá los dígitos.\n", encoding="utf-8")
+    (banco / "tests" / "caso_01.in").write_text("123\n", encoding="utf-8")
+    (banco / "tests" / "caso_01.out").write_text("3\n", encoding="utf-8")
+
+    ws = tmp_path / "ws"
+    (ws / "guias" / "entrega_9").mkdir(parents=True)
+    (ws / "entregas" / "entrega_9").mkdir(parents=True)
+    (ws / "guias" / "entrega_9" / "guia.yaml").write_text(
+        "nombre: Entrega 9\nejercicios:\n- id: contador-digitos\n- id: inexistente\n", encoding="utf-8")
+    (ws / "dredd.yaml").write_text(
+        "version: '1.0'\nworkspace:\n  submissions_dir: entregas\n  deckard_bank_dir: ../banco\n"
+        "mapeos:\n- entrega: entrega_9\n  guia: guias/entrega_9/guia.yaml\n", encoding="utf-8")
+
+    assert load_dredd_config(ws).banco_deckard() == (tmp_path / "ws" / ".." / "banco")
+    guia = load_activity_guide(ws / "entregas" / "entrega_9", "entrega_9", ws)
+    ej = guia.get_exercise("contador-digitos")
+    assert ej.titulo == "Contador de Dígitos"
+    assert ej.test_cases == [{"nombre": "caso_01", "entrada": "123\n", "salida": "3\n"}]
+    assert "int contar" in ej.solucion_c
+    assert ej.enunciado == "Contá los dígitos."
+    assert ej.pistas == ["El 0 tiene 1 dígito."]
+    assert guia.get_exercise("inexistente").test_cases == []
+
+    avisos = [m for nivel, comp, m in validate_workspace(ws) if comp == "casos:entrega_9"]
+    assert avisos and "inexistente" in avisos[0] and "contador-digitos" not in avisos[0]

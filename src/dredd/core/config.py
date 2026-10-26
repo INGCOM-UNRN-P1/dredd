@@ -345,6 +345,9 @@ class WorkspaceSettings:
     default_mode: str = "auto"
     default_source: str = "moodle"  # "moodle", "github", "hibrido"
     github_default_branch: str = "main"
+    # Banco central de deckard (<banco>/<id>/ejercicio.yaml, solucion.c, enunciado.md, tests/):
+    # de ahí salen los ejercicios de una guía que no tienen .ripkg ni carpeta propia.
+    deckard_bank_dir: str = ""
 
 
 @dataclass
@@ -444,6 +447,15 @@ class DreddConfig:
                 return cand_p
         return None
 
+    def banco_deckard(self) -> Optional[Path]:
+        """El banco de deckard declarado (relativo a dredd.yaml, admite `~`), si existe."""
+        if not self.workspace.deckard_bank_dir:
+            return None
+        banco = Path(self.workspace.deckard_bank_dir).expanduser()
+        if not banco.is_absolute():
+            banco = (self.config_path.parent if self.config_path else Path.cwd()) / banco
+        return banco if banco.is_dir() else None
+
     def get_effective_checks(self, activity_slug: Optional[str] = None) -> ToolChecksConfig:
         """Calcula los chequeos efectivos fusionando las políticas globales con los overrides de la entrega."""
         global_dict = self.checks.to_dict()
@@ -523,6 +535,7 @@ class DreddConfig:
                 "default_mode": self.workspace.default_mode,
                 "default_source": self.workspace.default_source,
                 "github_default_branch": self.workspace.github_default_branch,
+                **({"deckard_bank_dir": self.workspace.deckard_bank_dir} if self.workspace.deckard_bank_dir else {}),
             },
             "checks": self.checks.to_dict(),
             "mapeos": mapeos_list,
@@ -565,6 +578,7 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
                         default_mode=ws_raw.get("default_mode", "auto"),
                         default_source=ws_raw.get("default_source", "moodle"),
                         github_default_branch=ws_raw.get("github_default_branch", "main"),
+                        deckard_bank_dir=str(ws_raw.get("deckard_bank_dir") or ""),
                     )
 
                     checks_cfg = ToolChecksConfig.from_dict(raw.get("checks", {}))
@@ -702,6 +716,22 @@ ejercicios:
     return root, config_file
 
 
+def _ejercicios_sin_fuente(entrega: str, ws: Path) -> List[Tuple[str, str, str]]:
+    """Ejercicios de la guía sin casos de prueba (ni .ripkg, ni carpeta, ni entrada en el banco):
+    dredd los evaluaría sólo con el `make test` del alumno (F-05)."""
+    from dredd.core.guide_integration import load_activity_guide
+
+    guia = load_activity_guide(ws, entrega, ws)
+    if guia is None or not guia.exercises:
+        return []
+    sin_casos = [e.id for e in guia.exercises if not e.test_cases]
+    if not sin_casos:
+        return []
+    return [("WARN", f"casos:{entrega}",
+             f"{len(sin_casos)} de {len(guia.exercises)} ejercicio(s) sin casos de prueba de la cátedra: "
+             f"{', '.join(sin_casos)}. Empaquetalos con `dredd deckard sync {entrega}` o sumalos al banco.")]
+
+
 def validate_workspace(workspace_dir: Optional[Path | str] = None) -> List[Tuple[str, str, str]]:
     """Valida la integridad del espacio de trabajo y reporta problemas (nivel, componente, mensaje)."""
     ws = Path(workspace_dir).resolve() if workspace_dir else Path.cwd().resolve()
@@ -727,6 +757,13 @@ def validate_workspace(workspace_dir: Optional[Path | str] = None) -> List[Tuple
         else:
             issues.append(("OK", f"directorio:{attr}", f"Directorio '{dir_name}' presente."))
 
+    if cfg.workspace.deckard_bank_dir:
+        banco = cfg.banco_deckard()
+        if banco is None:
+            issues.append(("WARN", "deckard_bank_dir", f"El banco de deckard '{cfg.workspace.deckard_bank_dir}' no existe."))
+        else:
+            issues.append(("OK", "deckard_bank_dir", f"Banco de deckard: {banco}"))
+
     # Validar mapeos y guías asociadas
     if not cfg.mapeos:
         issues.append(("WARN", "mapeos", "No hay entregas mapeadas en dredd.yaml."))
@@ -738,5 +775,6 @@ def validate_workspace(workspace_dir: Optional[Path | str] = None) -> List[Tuple
                     issues.append(("WARN", f"guia:{m.entrega}", f"La guía '{m.guia}' para '{m.entrega}' no existe."))
                 else:
                     issues.append(("OK", f"guia:{m.entrega}", f"Guía vinculada para '{m.entrega}': {m.guia}"))
+                    issues.extend(_ejercicios_sin_fuente(m.entrega, ws))
 
     return issues

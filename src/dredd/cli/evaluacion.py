@@ -127,6 +127,10 @@ def ejecutar_evaluacion(
     if guide and guide.exercises:
         if not json_output:
             console.print(f"[bold green]✓ Guía Deckard conectada ('{guide.nombre}'): {len(guide.exercises)} ejercicio(s) ({', '.join(guide.get_exercise_ids())}) | Modo: {effective_tipo}[/bold green]")
+            sin_casos = [e.id for e in guide.exercises if not e.test_cases]
+            if sin_casos:
+                console.print(f"[yellow]⚠ {len(sin_casos)} ejercicio(s) sin casos de prueba de la cátedra ({', '.join(sin_casos)}): "
+                              f"se evalúan sólo con las pruebas del alumno. Ver `dredd deckard sync {exercise_slug}`.[/yellow]")
     else:
         if not json_output:
             console.print(f"[bold blue]Modo de construcción activo: {effective_tipo}[/bold blue]")

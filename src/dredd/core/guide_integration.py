@@ -134,7 +134,8 @@ def _parse_ripkg_payload(ripkg_path: Path) -> Dict[str, Any]:
     return info
 
 
-def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None) -> Optional[ActivityGuide]:
+def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None,
+                           banco_dir: Optional[Path] = None) -> Optional[ActivityGuide]:
     try:
         data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
     except Exception:
@@ -194,6 +195,11 @@ def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None) ->
             if matching_ripkgs:
                 ripkg_file = matching_ripkgs[0]
 
+        if not ripkg_file and not ex_dir and banco_dir and (banco_dir / eid / "ejercicio.yaml").is_file():
+            # Sin paquete ni carpeta en la guía: el ejercicio del banco de deckard (F-05).
+            ex_dir = banco_dir / eid
+            ej_yaml = ex_dir / "ejercicio.yaml"
+
         ripkg_info = _parse_ripkg_payload(ripkg_file) if ripkg_file else {}
         ex_enunciado = ripkg_info.get("enunciado", "")
         ex_pistas = ripkg_info.get("pistas", [])
@@ -216,10 +222,13 @@ def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None) ->
                 rol_familia = rol_familia or ej_data.get("rol_familia", ej_data.get("rol", item_data.get("role")))
                 dependencias = dependencias or ej_data.get("dependencias", ej_data.get("requires", ej_data.get("deps", [])))
                 archivos_req = archivos_req or ej_data.get("archivos_requeridos", ej_data.get("archivos_adicionales", []))
+                ex_pistas = ex_pistas or [str(p) for p in ej_data.get("pistas") or []]
             except Exception:
                 pass
 
         if ex_dir:
+            if not solucion and (ex_dir / "solucion.c").is_file():
+                solucion = (ex_dir / "solucion.c").read_text(encoding="utf-8", errors="replace")
             tests_dir = ex_dir / "tests"
             if tests_dir.is_dir() and not test_cases:
                 for f_in in sorted(tests_dir.glob("*.in")):
@@ -367,7 +376,7 @@ def _parse_guide_from_exercise_dirs(guide_dir: Path, exercise_dirs: List[Path]) 
     )
 
 
-def load_guide_from_deckard_dir(deckard_dir: Path) -> Optional[ActivityGuide]:
+def load_guide_from_deckard_dir(deckard_dir: Path, banco_dir: Optional[Path] = None) -> Optional[ActivityGuide]:
     """Carga una guía y sus enunciados desde un directorio .deckard (máxima prioridad)."""
     if not deckard_dir.is_dir():
         return None
@@ -376,7 +385,7 @@ def load_guide_from_deckard_dir(deckard_dir: Path) -> Optional[ActivityGuide]:
     for gy_name in ("guia.yaml", "guia.yml"):
         gy = deckard_dir / gy_name
         if gy.is_file():
-            guide = _parse_guide_yaml_file(gy, guide_dir=deckard_dir)
+            guide = _parse_guide_yaml_file(gy, guide_dir=deckard_dir, banco_dir=banco_dir)
             if guide:
                 guide.enunciado_source = f".deckard ({deckard_dir})"
                 return guide
@@ -459,10 +468,17 @@ def load_activity_guide(
          * <workspace>/guias/<clean_slug>
          * <workspace>/guias/<clean_slug>/guia.yaml
          * <sub_dir>/guia o <sub_dir>/guia.yaml
+
+    En cualquiera de los dos casos, un ejercicio de la guía sin .ripkg ni carpeta propia se
+    completa desde `workspace.deckard_bank_dir` (`<banco>/<id>/`) si dredd.yaml lo declara.
     """
     sub_dir = Path(submissions_dir).resolve() if submissions_dir else Path.cwd()
     ws = Path(workspace_dir).resolve() if workspace_dir else Path.cwd()
     clean_slug = Path(activity_slug).name.rstrip("/\\") or activity_slug.strip("/\\")
+
+    from dredd.core.config import load_dredd_config
+    cfg = load_dredd_config(ws) or load_dredd_config(sub_dir)
+    banco = cfg.banco_deckard() if cfg else None
 
     # =========================================================================
     # 1. PRIORIDAD MÁXIMA: Buscar en directorio '.deckard'
@@ -487,7 +503,7 @@ def load_activity_guide(
 
     for cand_deck in deckard_candidates:
         if cand_deck.is_dir():
-            g = load_guide_from_deckard_dir(cand_deck)
+            g = load_guide_from_deckard_dir(cand_deck, banco_dir=banco)
             if g:
                 g.enunciado_source = f".deckard ({cand_deck})"
                 return g
@@ -495,15 +511,12 @@ def load_activity_guide(
     # =========================================================================
     # 2. CONFIGURACIÓN GENERAL: Fallback si .deckard no está presente
     # =========================================================================
-    from dredd.core.config import load_dredd_config
-    cfg = load_dredd_config(ws) or load_dredd_config(sub_dir)
-
     # 2a. dredd.yaml mapeo
     if cfg:
         cfg_guide_path = cfg.get_guide_path(clean_slug, ws)
         if cfg_guide_path:
             if cfg_guide_path.is_file() and cfg_guide_path.suffix in (".yaml", ".yml"):
-                g = _parse_guide_yaml_file(cfg_guide_path)
+                g = _parse_guide_yaml_file(cfg_guide_path, banco_dir=banco)
                 if g:
                     g.enunciado_source = f"configuración general (dredd.yaml: {cfg_guide_path})"
                     return g
@@ -511,13 +524,13 @@ def load_activity_guide(
                 # Si el directorio configurado en dredd.yaml tiene .deckard, usarlo
                 for deck_sub in [cfg_guide_path / ".deckard", cfg_guide_path / clean_slug / ".deckard"]:
                     if deck_sub.is_dir():
-                        g = load_guide_from_deckard_dir(deck_sub)
+                        g = load_guide_from_deckard_dir(deck_sub, banco_dir=banco)
                         if g:
                             g.enunciado_source = f"configuración general (.deckard en {deck_sub})"
                             return g
                 gy = cfg_guide_path / "guia.yaml" if (cfg_guide_path / "guia.yaml").is_file() else cfg_guide_path / "guia.yml"
                 if gy.is_file():
-                    g = _parse_guide_yaml_file(gy, guide_dir=cfg_guide_path)
+                    g = _parse_guide_yaml_file(gy, guide_dir=cfg_guide_path, banco_dir=banco)
                     if g:
                         g.enunciado_source = f"configuración general ({cfg_guide_path})"
                         return g
@@ -554,7 +567,7 @@ def load_activity_guide(
 
     for cand in general_locations:
         if cand.is_file() and cand.suffix in (".yaml", ".yml"):
-            g = _parse_guide_yaml_file(cand)
+            g = _parse_guide_yaml_file(cand, banco_dir=banco)
             if g:
                 g.enunciado_source = f"configuración general ({cand})"
                 return g
@@ -562,14 +575,14 @@ def load_activity_guide(
             # Si el directorio de la práctica tiene .deckard (directo o anidado)
             for cand_deck in [cand / ".deckard", cand / clean_slug / ".deckard"]:
                 if cand_deck.is_dir():
-                    g = load_guide_from_deckard_dir(cand_deck)
+                    g = load_guide_from_deckard_dir(cand_deck, banco_dir=banco)
                     if g:
                         g.enunciado_source = f"configuración general ({cand_deck})"
                         return g
             try:
                 for sub in cand.iterdir():
                     if sub.is_dir() and (sub / ".deckard").is_dir():
-                        g = load_guide_from_deckard_dir(sub / ".deckard")
+                        g = load_guide_from_deckard_dir(sub / ".deckard", banco_dir=banco)
                         if g:
                             g.enunciado_source = f"configuración general ({sub / '.deckard'})"
                             return g
@@ -578,7 +591,7 @@ def load_activity_guide(
 
             guide_yaml = cand / "guia.yaml" if (cand / "guia.yaml").is_file() else cand / "guia.yml"
             if guide_yaml.is_file():
-                g = _parse_guide_yaml_file(guide_yaml, guide_dir=cand)
+                g = _parse_guide_yaml_file(guide_yaml, guide_dir=cand, banco_dir=banco)
                 if g:
                     g.enunciado_source = f"configuración general ({cand})"
                     return g
