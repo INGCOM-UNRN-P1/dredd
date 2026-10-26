@@ -309,6 +309,10 @@ class MappingRule:
 
     def matches_zip(self, zip_filename: str) -> bool:
         """Verifica si el nombre de archivo ZIP coincide con el patrón configurado."""
+        # Una entrega de GitHub o sin zip_pattern no viene en un ZIP: antes el patrón por omisión era
+        # «*» y la primera regla de GitHub se quedaba con cualquier ZIP (y con cualquier nombre).
+        if self.source.lower() == "github" or not self.zip_pattern:
+            return False
         name = Path(zip_filename).name
         if fnmatch.fnmatch(name.lower(), self.zip_pattern.lower()):
             return True
@@ -502,7 +506,7 @@ class DreddConfig:
         mapeos_list = []
         for m in self.mapeos:
             item: Dict[str, Any] = {
-                "zip_pattern": m.zip_pattern,
+                **({"zip_pattern": m.zip_pattern} if m.zip_pattern else {}),
                 "entrega": m.entrega,
                 "guia": m.guia or "",
                 "titulo": m.titulo or "",
@@ -588,7 +592,7 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
                         if isinstance(m, dict):
                             mapeos.append(
                                 MappingRule(
-                                    zip_pattern=m.get("zip_pattern", "*"),
+                                    zip_pattern=m.get("zip_pattern", ""),
                                     entrega=m.get("entrega", "entrega_1"),
                                     guia=m.get("guia") or m.get("practica"),
                                     practica=m.get("practica"),

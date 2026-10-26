@@ -147,3 +147,19 @@ def test_actividad_duplicada_en_la_raiz_usa_la_de_submissions_dir(tmp_path: Path
     assert "también en" in capsys.readouterr().err
     # una ruta explícita sigue mandando
     assert resolve_submissions_dir(ws, "./entrega_1")[1] == (ws / "entrega_1").resolve()
+
+
+def test_regla_de_github_no_se_queda_con_cualquier_zip(tmp_path: Path):
+    """Una regla sin zip_pattern (GitHub) no coincide con ZIPs ni nombres ajenos (antes valía «*»)."""
+    from dredd.core.git_ops import resolve_submissions_dir
+
+    ws = _workspace(tmp_path, "mapeos:\n- entrega: TP0\n  source: github\n- zip_pattern: '*Entrega #1-*.zip'\n  entrega: entrega_1\n")
+    (ws / "entregas" / "TP0").mkdir(parents=True)
+    (ws / "entregas" / "parcial_1").mkdir(parents=True)
+    cfg = load_dredd_config(ws)
+    assert cfg.find_mapping_for_zip("PROG1 Parcial 1-1250000.zip") is None
+    assert cfg.find_mapping_for_zip("PROG1 Entrega #1-1228009.zip").entrega == "entrega_1"
+    assert resolve_submissions_dir(ws, "parcial_1")[1] == (ws / "entregas" / "parcial_1").resolve()
+    import yaml
+
+    assert "zip_pattern" not in yaml.safe_load(cfg.to_yaml())["mapeos"][0]
