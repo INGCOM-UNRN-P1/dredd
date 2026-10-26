@@ -77,3 +77,59 @@ def test_fuzz_gen_resuelve_la_solucion_modelo_del_banco(tmp_path: Path, monkeypa
     with pytest.raises(typer.Exit) as exc:
         resolver_modelo("no-existe", ws)
     assert exc.value.exit_code == 2
+
+
+def test_deckard_sync_empaqueta_lo_que_esta_en_el_banco(tmp_path: Path, monkeypatch):
+    import subprocess
+
+    from typer.testing import CliRunner
+
+    from dredd.cli import app
+
+    for eid in ("a", "b"):
+        (tmp_path / "banco" / eid).mkdir(parents=True)
+        (tmp_path / "banco" / eid / "ejercicio.yaml").write_text(f"id: {eid}\n", encoding="utf-8")
+    (tmp_path / "ws").mkdir()
+    ws = _workspace(tmp_path / "ws", "  deckard_bank_dir: ../banco\nmapeos:\n- entrega: e9\n  guia: guias/e9/guia.yaml\n")
+    (ws / "guias" / "e9").mkdir(parents=True)
+    (ws / "guias" / "e9" / "guia.yaml").write_text("ejercicios:\n- id: a\n- id: b\n- id: z\n", encoding="utf-8")
+    (ws / "guias" / "e9" / "b.ripkg").write_bytes(b"previo")
+
+    llamadas = []
+
+    def falso_pack(cmd, **_):
+        if "--help" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "Uso: deckard export pack [OPCIONES] {objetivo}", "")
+        llamadas.append(cmd[3])
+        Path(cmd[cmd.index("--salida") + 1]).write_bytes(b"PK")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/deckard")
+    monkeypatch.setattr(subprocess, "run", falso_pack)
+    monkeypatch.chdir(ws)
+    res = CliRunner().invoke(app, ["deckard", "sync", "e9"])
+    assert res.exit_code == 0, res.output
+    assert llamadas == ["a"]
+    assert (ws / "guias" / "e9" / "b.ripkg").read_bytes() == b"previo"
+    assert "No están en el banco" in res.output and "z" in res.output
+
+
+def test_deckard_sync_con_deckard_viejo_falla_una_vez(tmp_path: Path, monkeypatch):
+    import subprocess
+
+    from typer.testing import CliRunner
+
+    from dredd.cli import app
+
+    (tmp_path / "banco" / "a").mkdir(parents=True)
+    (tmp_path / "banco" / "a" / "ejercicio.yaml").write_text("id: a\n", encoding="utf-8")
+    (tmp_path / "ws").mkdir()
+    ws = _workspace(tmp_path / "ws", "  deckard_bank_dir: ../banco\nmapeos:\n- entrega: e9\n  guia: guias/e9/guia.yaml\n")
+    (ws / "guias" / "e9").mkdir(parents=True)
+    (ws / "guias" / "e9" / "guia.yaml").write_text("ejercicios:\n- id: a\n", encoding="utf-8")
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/deckard")
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **_: subprocess.CompletedProcess(cmd, 0, "Uso: deckard export run", ""))
+    monkeypatch.chdir(ws)
+    res = CliRunner().invoke(app, ["deckard", "sync", "e9"])
+    assert res.exit_code == 1
+    assert not (ws / "guias" / "e9" / "a.ripkg").exists()

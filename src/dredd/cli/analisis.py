@@ -120,6 +120,77 @@ def resolver_modelo(modelo: str, workspace_dir: Optional[Path] = None) -> Path:
     raise typer.Exit(code=2)
 
 
+def cmd_deckard_sync(
+    actividad: str = typer.Argument(..., help="Actividad mapeada en dredd.yaml (ej. entrega_4)."),
+    forzar: bool = typer.Option(False, "--force", "-f", help="Volver a empaquetar los .ripkg que ya existen."),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Mostrar qué se empaquetaría sin llamar a deckard."),
+) -> None:
+    """Empaqueta con `deckard export pack` los ejercicios de la guía que están en el banco, junto a guia.yaml."""
+    import shutil
+    import subprocess
+
+    import yaml
+
+    from dredd.core.config import load_dredd_config
+
+    ws = Path.cwd()
+    cfg = load_dredd_config(ws)
+    if cfg is None:
+        _err.print("[bold red]Error:[/bold red] no hay dredd.yaml en el directorio actual ni en sus padres.")
+        raise typer.Exit(code=2)
+    banco = cfg.banco_deckard()
+    if banco is None:
+        _err.print("[bold red]Error:[/bold red] dredd.yaml no declara un workspace.deckard_bank_dir existente.")
+        raise typer.Exit(code=2)
+    guia = cfg.get_guide_path(actividad, cfg.config_path.parent if cfg.config_path else ws)
+    if guia is not None and guia.is_dir():
+        guia = guia / "guia.yaml"
+    if guia is None or not guia.is_file():
+        _err.print(f"[bold red]Error:[/bold red] «{actividad}» no tiene una guia.yaml mapeada en dredd.yaml.")
+        raise typer.Exit(code=2)
+    deckard = shutil.which("deckard")
+    if not dry_run:
+        if deckard is None:
+            _err.print("[bold red]Error:[/bold red] falta deckard: uv tool install git+https://github.com/INGCOM-UNRN/deckard")
+            raise typer.Exit(code=1)
+        ayuda = subprocess.run([deckard, "export", "pack", "--help"], capture_output=True, text=True)
+        if ayuda.returncode != 0 or "export pack" not in ayuda.stdout:  # uno viejo responde con la de `export run`
+            _err.print(f"[bold red]Error:[/bold red] el deckard de {deckard} no tiene `export pack` (es anterior): "
+                       "actualizalo con uv tool install --reinstall git+https://github.com/INGCOM-UNRN/deckard")
+            raise typer.Exit(code=1)
+
+    datos = yaml.safe_load(guia.read_text(encoding="utf-8")) or {}
+    ids = [e.get("id") if isinstance(e, dict) else e for e in datos.get("ejercicios") or []]
+    empaquetados: List[str] = []
+    existentes: List[str] = []
+    fuera_del_banco: List[str] = []
+    fallidos: List[str] = []
+    for eid in [str(i) for i in ids if i]:
+        destino = guia.parent / f"{eid}.ripkg"
+        if not (banco / eid / "ejercicio.yaml").is_file():
+            fuera_del_banco.append(eid)
+        elif destino.is_file() and not forzar:
+            existentes.append(eid)
+        elif dry_run:
+            empaquetados.append(eid)
+        else:
+            proc = subprocess.run([str(deckard), "export", "pack", eid, "--banco", str(banco), "--salida", str(destino)],
+                                  capture_output=True, text=True)
+            (empaquetados if proc.returncode == 0 and destino.is_file() else fallidos).append(eid)
+            if proc.returncode != 0:
+                _err.print(f"[red]✗ {eid}:[/red] {(proc.stderr or proc.stdout).strip()}")
+
+    verbo = "Se empaquetarían" if dry_run else "Empaquetados"
+    console.print(f"[bold]{actividad}[/bold] → {guia.parent}")
+    console.print(f"  {verbo}: {len(empaquetados)} {', '.join(empaquetados)}")
+    if existentes:
+        console.print(f"  Ya existían (--force para rehacerlos): {len(existentes)}")
+    if fuera_del_banco:
+        console.print(f"[yellow]  No están en el banco ({banco}): {len(fuera_del_banco)} {', '.join(fuera_del_banco)}[/yellow]")
+    if fallidos:
+        raise typer.Exit(code=1)
+
+
 def fuzz_gen(
     modelo_arg: str = typer.Argument(..., metavar="MODELO",
                                      help="Solución modelo de la cátedra (.c) o id de un ejercicio del banco de deckard."),

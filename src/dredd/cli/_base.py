@@ -35,6 +35,9 @@ app.add_typer(config_app, name="config")
 evaluate_app = typer.Typer(name="evaluate", help="Evaluación docente, autograding y limpieza de entregas.", no_args_is_help=True)
 app.add_typer(evaluate_app, name="evaluate")
 
+deckard_app = typer.Typer(name="deckard", help="Integración con el banco de ejercicios de deckard.", no_args_is_help=True)
+app.add_typer(deckard_app, name="deckard")
+
 console = Console()
 
 

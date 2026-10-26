@@ -4,7 +4,7 @@ Los comandos viven en un módulo por área (configuracion, evaluacion, github, e
 analisis); acá se registran en las apps, en el orden en que aparecen en `dredd --help`.
 """
 
-from dredd.cli._base import app, config_app, evaluate_app, github_app, moodle_app
+from dredd.cli._base import app, config_app, deckard_app, evaluate_app, github_app, moodle_app
 from dredd.cli.configuracion import (  # noqa: F401
     cmd_config_add_entrega,
     cmd_config_preset,
@@ -51,6 +51,7 @@ from dredd.cli.analisis import (  # noqa: F401
     cmd_audit_makefile,
     cmd_audit_versions,
     cmd_cluster_errors,
+    cmd_deckard_sync,
     cmd_doctor,
     cmd_map,
     cmd_multiplex,
@@ -76,6 +77,7 @@ app.command('export')(cmd_export)
 app.command('export-report')(cmd_export_report)
 moodle_app.command('export')(cmd_moodle_export)
 app.command('fuzz-gen')(fuzz_gen)
+deckard_app.command('sync')(cmd_deckard_sync)
 app.command('oral-guide')(oral_guide)
 app.command('multiplex')(cmd_multiplex)
 config_app.command('show')(cmd_config_show)
