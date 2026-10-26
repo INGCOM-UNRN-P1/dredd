@@ -118,3 +118,48 @@ def test_reporter_marks_binary_errors(tmp_path: Path):
     )
     assert "ENTREGA NO APROBADA (Archivos binarios prohibidos detectados)" in feedback
     assert "Archivos Binarios (.o, .a, .exe):** ❌" in feedback
+
+
+def test_binarios_de_una_compilacion_previa_no_se_informan_en_un_repo_git(tmp_path: Path):
+    """En un repo del alumno sólo cuenta lo versionado: los .o y ejecutables que dejó el `make`
+    de una corrida anterior se purgan sin informarse (antes eran falsos positivos)."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    (repo / "libs").mkdir(parents=True)
+    (repo / "main.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    (repo / "entregado.exe").write_bytes(b"MZ\x90\x00executable")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "main.c", "entregado.exe"], check=True)
+    compilado = repo / "libs" / "libarreglos.a"
+    compilado.write_bytes(b"!<arch>\nfake")
+    (repo / "main.o").write_bytes(b"\x7fELF\x02\x01\x01\x00fake")
+
+    findings = audit_and_purge_binaries_from_dir(repo)
+
+    assert [f["file"] for f in findings] == ["entregado.exe"]
+    assert not compilado.exists() and not (repo / "main.o").exists()
+
+
+def test_binarios_en_una_revision_de_moodle_los_informa_la_ingesta(tmp_path: Path):
+    alumno = tmp_path / "perez_123"
+    (alumno / "r1").mkdir(parents=True)
+    (alumno / ".metadata.db").write_bytes(b"")
+    (alumno / "r1" / "programa.o").write_bytes(b"\x7fELF\x02\x01\x01\x00fake")
+
+    assert audit_and_purge_binaries_from_dir(alumno / "r1") == []
+    assert not (alumno / "r1" / "programa.o").exists()
+
+
+def test_binario_versionado_ya_purgado_se_sigue_informando(tmp_path: Path):
+    """Una corrida anterior borró del disco el .exe versionado: la siguiente lo lee del índice."""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    (repo / "output").mkdir(parents=True)
+    (repo / "output" / "ej1.exe").write_bytes(b"MZ\x90\x00executable")
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+
+    assert [f["file"] for f in audit_and_purge_binaries_from_dir(repo)] == ["output/ej1.exe"]
+    assert [f["file"] for f in audit_and_purge_binaries_from_dir(repo)] == ["output/ej1.exe"]
