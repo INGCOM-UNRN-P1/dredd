@@ -57,7 +57,9 @@ def es_archivo_informe(path: Path, alumno: Optional[str] = None) -> bool:
         return False
     if PATRON_ARCHIVO_INFORME.match(path.name):
         return True
-    return bool(alumno) and re.match(re.escape(alumno) + _SUFIJO_REVISION_GITHUB, path.name, re.IGNORECASE) is not None
+    if not alumno:
+        return False
+    return re.match(re.escape(alumno) + _SUFIJO_REVISION_GITHUB, path.name, re.IGNORECASE) is not None
 
 
 def _obtener_tamano_directorio(dir_path: Path) -> int:
