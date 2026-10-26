@@ -54,7 +54,11 @@ def cmd_config_show(
     console.print(f"  • [bold]Directorio ZIPs:[/bold] [cyan]{cfg.workspace.zips_dir}/[/cyan]")
     console.print(f"  • [bold]Directorio Entregas:[/bold] [cyan]{cfg.workspace.submissions_dir}/[/cyan]")
     console.print(f"  • [bold]Directorio Guías:[/bold] [cyan]{cfg.workspace.guias_dir}/[/cyan]")
-    console.print(f"  • [bold]Plantillas:[/bold] [cyan]{cfg.workspace.plantillas_dir}/[/cyan]\n")
+    console.print(f"  • [bold]Plantillas:[/bold] [cyan]{cfg.workspace.plantillas_dir}/[/cyan]")
+    if cfg.workspace.deckard_bank_dir:
+        estado = "" if cfg.banco_deckard() else " [red](no existe)[/red]"
+        console.print(f"  • [bold]Banco de deckard:[/bold] [cyan]{cfg.workspace.deckard_bank_dir}[/cyan]{estado}")
+    console.print()
 
     # Tabla de Chequeos Globales
     chk = cfg.checks
