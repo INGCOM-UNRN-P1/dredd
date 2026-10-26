@@ -151,3 +151,56 @@ def test_export_report_de_un_fuente_c_no_se_cuelga(tmp_path: Path):
     assert _termina(fuente.read_text())
     salida = export_report(fuente, fmt="html", out_path=tmp_path / "lista.html")
     assert Path(salida).exists()
+
+
+def test_export_de_github_va_al_directorio_de_entregas(tmp_path: Path):
+    """F-03: sin .metadata.db (GitHub) las salidas van a entregas/<act>/ y salen de auditoria.json."""
+    from dredd.core import auditoria
+
+    (tmp_path / "dredd.yaml").write_text(
+        "version: '1.0'\nworkspace:\n  submissions_dir: entregas\nmapeos:\n- entrega: TP0\n  source: github\n",
+        encoding="utf-8",
+    )
+    alumno = tmp_path / "entregas" / "TP0" / "TP0-facubnv"
+    (alumno / "repo").mkdir(parents=True)
+    auditoria.registrar(alumno / "i_b763cc8", alumno="TP0-facubnv", actividad="TP0", revision="b763cc8",
+                        estado="completa",
+                        resultado={"compilacion": True, "tests": {"aprobados": 3, "total": 4, "casos": []}})
+    (alumno / "TP0-facubnv_b763cc8.md").write_text("# Informe\n", encoding="utf-8")
+    sin_evaluar = tmp_path / "entregas" / "TP0" / "TP0-otro"
+    (sin_evaluar / "repo").mkdir(parents=True)
+
+    exporter = MoodleExporter(workspace_dir=tmp_path)
+    csv_file = exporter.export_grades_csv("TP0")
+    zip_file = exporter.export_feedback_zip("TP0")
+    dash_file = exporter.generate_dashboard("TP0")
+
+    destino = tmp_path / "entregas" / "TP0"
+    assert {csv_file.parent, zip_file.parent, dash_file.parent} == {destino}
+    assert not (tmp_path / "TP0").exists()
+
+    filas = csv_file.read_text(encoding="utf-8-sig").splitlines()
+    assert "Revisión b763cc8 | Compilación: OK | Estilo: —/10 | Tests: 7.5/10" in filas[1]
+    assert ",," in filas[1]  # sin nota conocida la calificación queda vacía, no en 0
+    assert "SIN EVALUAR" in filas[2]
+    dash = dash_file.read_text(encoding="utf-8")
+    assert "50.0% (1/2)" in dash
+    assert "| b763cc8 | ✓ OK |" in dash
+
+
+def test_export_de_actividad_inexistente_no_crea_carpetas(tmp_path: Path):
+    import pytest
+
+    with pytest.raises(FileNotFoundError):
+        MoodleExporter(workspace_dir=tmp_path).generate_dashboard("TP9")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_export_de_revision_sin_auditoria(tmp_path: Path):
+    """Una revisión evaluada antes del cursor (sin auditoria.json) no se confunde con una sin evaluar."""
+    alumno = tmp_path / "TP0" / "TP0-ana"
+    (alumno / "i_253ca9a").mkdir(parents=True)
+    (alumno / "TP0-ana_253ca9a.md").write_text("# Informe\n", encoding="utf-8")
+    datos = MoodleExporter(workspace_dir=tmp_path)._get_all_activity_data("TP0")
+    assert (datos[0]["revision"], datos[0]["compilation_status"]) == ("253ca9a", "SIN REGISTRO")
+    assert datos[0]["report_file"].name == "TP0-ana_253ca9a.md"
