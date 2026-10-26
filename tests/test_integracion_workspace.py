@@ -163,3 +163,30 @@ def test_regla_de_github_no_se_queda_con_cualquier_zip(tmp_path: Path):
     import yaml
 
     assert "zip_pattern" not in yaml.safe_load(cfg.to_yaml())["mapeos"][0]
+
+
+def test_estilo_usa_el_cli_de_gaff_con_rutas_relativas(tmp_path: Path, monkeypatch):
+    """La sección Gaff sale del mismo `gaff` que hace `gaff fix`, sin las bibliotecas de la cátedra."""
+    import json
+    import subprocess
+
+    from dredd.core import ripley_client
+
+    for rel in ("ejercicios/ej1/main.c", "ejercicios/ej2/main.c", "libs/p1_test/src/p1_test.c"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("int main(void)\n{\n    return 0;\n}\n", encoding="utf-8")
+    salida = {"archivos": [
+        {"archivo": a, "violaciones": [{"codigo": "0x0101h", "titulo": "Nombres", "archivo": a, "linea": 3,
+                                        "columna": 5, "mensaje": "corto", "es_autofixable": False}]}
+        for a in ("ejercicios/ej1/main.c", "ejercicios/ej2/main.c", "libs/p1_test/src/p1_test.c")]}
+    llamadas = []
+
+    def falso_run(cmd, **kwargs):
+        llamadas.append((cmd, kwargs.get("cwd")))
+        return subprocess.CompletedProcess(cmd, 1, json.dumps(salida), "")
+
+    monkeypatch.setattr(ripley_client, "resolve_sibling_cli", lambda nombre: "/usr/bin/gaff")
+    monkeypatch.setattr(ripley_client.subprocess, "run", falso_run)
+    hallazgos, _ = ripley_client.audit_style_with_gaff(tmp_path)
+    assert [h["file"] for h in hallazgos] == ["ejercicios/ej1/main.c", "ejercicios/ej2/main.c"]
+    assert llamadas == [(["/usr/bin/gaff", "check", "-r", ".", "--json"], str(tmp_path))]

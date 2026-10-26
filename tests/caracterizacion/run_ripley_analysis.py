@@ -238,7 +238,7 @@ def _dobles(esc: dict[str, Any], reg: _Registro) -> Iterator[None]:
         return "/opt/ripley" if esc.get("ripley_cli") else None
 
     def run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        reg.anotar("subprocess.run", cmd, **{k: v for k, v in kwargs.items() if k == "timeout"})
+        reg.anotar("subprocess.run", cmd, **{k: v for k, v in kwargs.items() if k in ("timeout", "cwd")})
         if cmd[0] == "/opt/ripley":
             if esc["ripley_cli"] == "falla":
                 return subprocess.CompletedProcess(cmd, 2, stdout="", stderr="uso")
@@ -246,9 +246,11 @@ def _dobles(esc: dict[str, Any], reg: _Registro) -> Iterator[None]:
                 return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"hallazgos": []}), stderr="")
             if esc["ripley_cli"] == "json_roto":
                 return subprocess.CompletedProcess(cmd, 1, stdout="{no es json", stderr="")
-            hallazgos = [{"code": "0x0001h", "title": "Nombres", "message": "corto", "file": "main.c", "line": 3},
-                         {"rule_code": "0x0009h", "severity": "ESTILO", "file": "otro.c"}]
-            return subprocess.CompletedProcess(cmd, 1, stdout=json.dumps({"findings": hallazgos}), stderr="")
+            # La forma común de yutani que emite ripley (rutas relativas a la raíz de la entrega).
+            hallazgos = [{"codigo": "0x0001h", "titulo": "Nombres", "mensaje": "corto", "archivo": "ej1/main.c",
+                          "linea": 3, "severidad": "estilo", "herramienta": "ripley"},
+                         {"codigo": "0x0009h", "severidad": "estilo", "archivo": "otro.c", "herramienta": "ripley"}]
+            return subprocess.CompletedProcess(cmd, 1, stdout=json.dumps({"hallazgos": hallazgos}), stderr="")
         if esc.get("make_test") == "excepcion" and cmd[-1] == "clean":
             raise OSError("make no está instalado")
         if cmd[-1] == "test":
@@ -258,8 +260,8 @@ def _dobles(esc: dict[str, Any], reg: _Registro) -> Iterator[None]:
             return subprocess.CompletedProcess(cmd, codigo, stdout=salida, stderr=error)
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    def audit_c_file(ruta: Path) -> list[dict[str, Any]]:
-        reg.anotar("audit_c_file", ruta)
+    def audit_c_file(ruta: Path, raiz: Any = None) -> list[dict[str, Any]]:
+        reg.anotar("audit_c_file", ruta, raiz=raiz)
         if ruta.name == "explota.c":
             raise ValueError("tree-sitter")
         return [{"rule_code": "0x0001h", "rule_name": "Nombres", "file": ruta.name, "line": 1},

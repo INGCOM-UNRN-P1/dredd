@@ -314,21 +314,27 @@
     [
      "<entrega>/falla.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "audit_c_file",
     [
      "<entrega>/main.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "audit_c_file",
     [
      "<entrega>/sistema.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "compile_c_sources",
@@ -653,12 +659,13 @@
     {
      "rule_code": "0x0001h",
      "rule_name": "Nombres",
-     "severity": "ADVERTENCIA",
+     "severity": "ESTILO",
      "message": "corto",
      "suggestion": "",
-     "file": "main.c",
+     "file": "ej1/main.c",
      "line": 3,
-     "column": 1
+     "column": 1,
+     "source_plugin": "ripley"
     },
     {
      "rule_code": "0x0009h",
@@ -668,7 +675,8 @@
      "suggestion": "",
      "file": "otro.c",
      "line": 1,
-     "column": 1
+     "column": 1,
+     "source_plugin": "ripley"
     }
    ],
    "tests": {
@@ -813,12 +821,13 @@
      [
       "/opt/ripley",
       "analyze",
-      "<entrega>",
+      ".",
       "--format",
       "json"
      ]
     ],
     {
+     "cwd": "<entrega>",
      "timeout": 60
     }
    ],
@@ -1024,12 +1033,13 @@
      [
       "/opt/ripley",
       "analyze",
-      "<entrega>",
+      ".",
       "--format",
       "json"
      ]
     ],
     {
+     "cwd": "<entrega>",
      "timeout": 60
     }
    ],
@@ -1038,7 +1048,9 @@
     [
      "<entrega>/main.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "compile_c_sources",
@@ -1286,12 +1298,13 @@
      [
       "/opt/ripley",
       "analyze",
-      "<entrega>",
+      ".",
       "--format",
       "json"
      ]
     ],
     {
+     "cwd": "<entrega>",
      "timeout": 60
     }
    ],
@@ -1300,21 +1313,27 @@
     [
      "<entrega>/explota.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "audit_c_file",
     [
      "<entrega>/main.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "audit_c_file",
     [
      "<entrega>/r1/x.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "compile_c_sources",
@@ -1404,26 +1423,7 @@
      }
     }
    },
-   "ast_findings": [
-    {
-     "rule_code": "0x0001h",
-     "rule_name": "Nombres",
-     "file": "main.c",
-     "line": 1
-    },
-    {
-     "rule_code": "0x1002h",
-     "rule_name": "continue",
-     "file": "main.c",
-     "line": 2
-    },
-    {
-     "rule_id": "0x0009H",
-     "rule_name": "Largo",
-     "file": "main.c",
-     "line": 3
-    }
-   ],
+   "ast_findings": [],
    "tests": {
     "total": 0,
     "passed": 0,
@@ -1535,21 +1535,15 @@
      [
       "/opt/ripley",
       "analyze",
-      "<entrega>",
+      ".",
       "--format",
       "json"
      ]
     ],
     {
+     "cwd": "<entrega>",
      "timeout": 60
     }
-   ],
-   [
-    "audit_c_file",
-    [
-     "<entrega>/main.c"
-    ],
-    {}
    ],
    [
     "compile_c_sources",
@@ -1957,14 +1951,18 @@
     [
      "<entrega>/ej1/main.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "audit_c_file",
     [
      "<entrega>/ej2/main.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "discover_and_run_local_testcases",
@@ -2167,7 +2165,9 @@
     [
      "<entrega>/main.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "compile_with_make",
@@ -2367,7 +2367,9 @@
     [
      "<entrega>/main.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "discover_and_run_local_testcases",
@@ -2583,7 +2585,9 @@
     [
      "<entrega>/main.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "subprocess.run",
@@ -2808,7 +2812,9 @@
     [
      "<entrega>/main.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "subprocess.run",
@@ -3095,14 +3101,18 @@
     [
      "<entrega>/main.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "audit_c_file",
     [
      "<entrega>/sistema.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "subprocess.run",
@@ -3371,7 +3381,9 @@
     [
      "<entrega>/main.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "subprocess.run",
@@ -3639,7 +3651,9 @@
     [
      "<entrega>/main.c"
     ],
-    {}
+    {
+     "raiz": "<entrega>"
+    }
    ],
    [
     "subprocess.run",

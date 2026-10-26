@@ -117,7 +117,7 @@ int main(void) {
     # ast_findings no debe descartarse cuando ripley_rules es ['all']
     ast_findings = res.get("ast_findings", [])
     assert len(ast_findings) > 0
-    ast_msgs = [f["message"] for f in ast_findings if f["rule_code"] in ("0x0001h", "GAFF011")]
+    ast_msgs = [f["message"] for f in ast_findings if f["rule_code"] in ("0x0001h", "0x0101h", "GAFF011")]
     assert any("'id'" in m for m in ast_msgs)
 
 
@@ -165,3 +165,43 @@ def test_audit_style_excludes_p1_test_framework(tmp_path: Path):
     assert "p1_test.h" not in files_audited
 
 
+
+
+def test_linter_de_respaldo_sin_falsos_positivos_de_espaciado(tmp_path: Path):
+    """Líneas de TP6 que el linter por regex marcaba: comentarios, `->`, multiplicación con cast y firmas."""
+    from dredd.core.ast_checker import audit_c_file
+
+    ej = tmp_path / "ejercicios" / "ejercicio1"
+    ej.mkdir(parents=True)
+    fuente = ej / "fraccion.c"
+    fuente.write_text(
+        "/**\n"
+        " * Suma: a+b // comentario\n"
+        " */\n"
+        "fraccion_t *fraccion_crear(int numerador, int denominador)\n"
+        "{\n"
+        "    long long prod1 = (long long)f1->numerador * f2->denominador;\n"
+        "    int divisor = mcd(numerador, denominador);\n"
+        "    int neg = -numerador;\n"
+        "    char *texto = \"a+b, c*d\";\n"
+        "    return NULL;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    hallazgos = audit_c_file(fuente, raiz=tmp_path)
+    assert not [h for h in hallazgos if h["rule_id"] in ("0x0002h", "0x0004h", "0x0018h")], hallazgos
+
+
+def test_linter_de_respaldo_detecta_los_casos_reales(tmp_path: Path):
+    from dredd.core.ast_checker import audit_c_file
+
+    fuente = tmp_path / "ej2" / "main.c"
+    fuente.parent.mkdir()
+    fuente.write_text(
+        "int main(void)\n{\n    int a, b;\n    int* p = NULL;\n    a=b+1;\n    return 0;\n}\n",
+        encoding="utf-8",
+    )
+    hallazgos = audit_c_file(fuente, raiz=tmp_path)
+    por_regla = {(h["rule_id"], h["line"]) for h in hallazgos}
+    assert {("0x0002h", 3), ("0x0018h", 4), ("0x0004h", 5)} <= por_regla
+    assert {h["file"] for h in hallazgos} == {"ej2/main.c"}

@@ -18,9 +18,55 @@ from dredd.core.sandbox import execute_sandboxed, audit_sandbox_evasion
 from dredd.core.valgrind import run_valgrind_check, ValgrindReport
 
 
+def _ruta_relativa(archivo: Path, raiz: Path) -> str:
+    """La ruta de `archivo` relativa a la raíz de la entrega, para ubicar los `main.c` y `prueba.c`
+    que se repiten en cada ejercicio (antes los informes daban sólo el nombre)."""
+    try:
+        return archivo.relative_to(raiz).as_posix() if raiz.is_dir() else archivo.name
+    except ValueError:
+        return archivo.name
+
+
 def _is_vendor_or_framework(p: Path) -> bool:
     parts_lower = [part.lower() for part in p.parts]
     return "p1_test" in parts_lower or "vendor" in parts_lower or p.name.startswith("p1_test")
+
+
+def _gaff_por_cli(target_path: Path, archivos: List[Path], enforce_var_len: bool) -> Optional[List[Dict[str, Any]]]:
+    """`gaff check -r --json` en la raíz de la entrega, sólo con los archivos que dredd evalúa; None
+    si no hay CLI o falla (entonces se usa la biblioteca o el respaldo)."""
+    gaff_cli = resolve_sibling_cli("gaff")
+    if not gaff_cli or not archivos:
+        return None
+    raiz = target_path if target_path.is_dir() else target_path.parent
+    objetivo = "." if target_path.is_dir() else target_path.name
+    try:
+        proc = subprocess.run([gaff_cli, "check", "-r", objetivo, "--json"], cwd=str(raiz),
+                              capture_output=True, text=True, timeout=120)
+        data = json.loads(proc.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("archivos"), list):
+        return None
+    evaluados = {_ruta_relativa(f, target_path) for f in archivos}
+    findings: List[Dict[str, Any]] = []
+    for archivo in data["archivos"]:
+        for v in archivo.get("violaciones") or []:
+            ruta = str(v.get("archivo") or archivo.get("archivo") or "")
+            codigo = str(v.get("codigo") or "")
+            if ruta not in evaluados or (not enforce_var_len and codigo in ("0x0001h", "GAFF011")):
+                continue
+            findings.append({
+                "rule_code": codigo,
+                "title": v.get("titulo") or "",
+                "file": ruta,
+                "line": v.get("linea") or 1,
+                "column": v.get("columna") or 1,
+                "message": v.get("mensaje") or "",
+                "suggestion": v.get("sugerencia") or "",
+                "autofixable": bool(v.get("es_autofixable")),
+            })
+    return findings
 
 
 def audit_style_with_gaff(
@@ -44,8 +90,15 @@ def audit_style_with_gaff(
 
     enforce_var_len = checks.enforce_variable_length if checks else True
 
-    analizar_archivo = resolve_sibling_tool("gaff", "gaff.core.linter", "analizar_archivo")
-    if analizar_archivo is not None:
+    # Primero el CLI `gaff`: es el mismo que corre `gaff fix`, así que lo que el informe marca es lo
+    # que el alumno puede arreglar. La biblioteca del extra `ecosistema` puede ser otra versión
+    # (estaba fijada en 0.1.0 y marcaba espaciados que el gaff vigente ya no) y el respaldo de
+    # abajo no es gaff (sólo largo de línea y nombres).
+    desde_cli = _gaff_por_cli(target_path, c_and_h_files, enforce_var_len)
+    analizar_archivo = None if desde_cli is not None else resolve_sibling_tool("gaff", "gaff.core.linter", "analizar_archivo")
+    if desde_cli is not None:
+        findings = desde_cli
+    elif analizar_archivo is not None:
         for f in c_and_h_files:
             try:
                 viols = analizar_archivo(f)
@@ -56,7 +109,7 @@ def audit_style_with_gaff(
                     findings.append({
                         "rule_code": rc,
                         "title": v.titulo,
-                        "file": f.name,
+                        "file": _ruta_relativa(f, target_path),
                         "line": v.linea,
                         "column": v.columna,
                         "message": v.mensaje,
@@ -77,7 +130,7 @@ def audit_style_with_gaff(
                         findings.append({
                             "rule_code": "GAFF009",
                             "title": "Línea demasiado larga (> 80 columnas)",
-                            "file": f.name,
+                            "file": _ruta_relativa(f, target_path),
                             "line": idx,
                             "column": 81,
                             "message": f"La línea tiene {len(l)} caracteres (máximo 80).",
@@ -88,7 +141,7 @@ def audit_style_with_gaff(
                         findings.append({
                             "rule_code": "GAFF010",
                             "title": "Tabulaciones en código fuente",
-                            "file": f.name,
+                            "file": _ruta_relativa(f, target_path),
                             "line": idx,
                             "column": l.find("\t") + 1,
                             "message": "Uso de tabuladores prohibido. Usar 4 espacios.",
@@ -102,7 +155,7 @@ def audit_style_with_gaff(
                             findings.append({
                                 "rule_code": "0x0001h",
                                 "title": "Identificador de variable no descriptivo",
-                                "file": f.name,
+                                "file": _ruta_relativa(f, target_path),
                                 "line": line_num,
                                 "column": 1,
                                 "message": f"Identificador de variable no descriptivo de una sola letra '{name}'.",
@@ -113,7 +166,7 @@ def audit_style_with_gaff(
                             findings.append({
                                 "rule_code": "0x0001h",
                                 "title": "Identificador corto y poco expresivo",
-                                "file": f.name,
+                                "file": _ruta_relativa(f, target_path),
                                 "line": line_num,
                                 "column": 1,
                                 "message": f"Identificador corto y poco expresivo '{name}' ({len(name)} caracteres).",
@@ -124,7 +177,7 @@ def audit_style_with_gaff(
                             findings.append({
                                 "rule_code": "0x0001h",
                                 "title": "Identificador excesivamente largo",
-                                "file": f.name,
+                                "file": _ruta_relativa(f, target_path),
                                 "line": line_num,
                                 "column": 1,
                                 "message": f"Identificador excesivamente largo '{name}' ({len(name)} caracteres).",
@@ -179,7 +232,7 @@ def audit_antipatterns_with_spunkmeyer(
                         "rule_code": rc,
                         "alias": getattr(ap, "alias", ""),
                         "name": getattr(ap, "nombre", "Antipatrón didáctico"),
-                        "file": f.name,
+                        "file": _ruta_relativa(f, target_path),
                         "line": ap.linea,
                         "column": ap.columna,
                         "message": ap.mensaje,
@@ -234,7 +287,7 @@ def audit_antipatterns_with_spunkmeyer(
                             "rule_code": "0x4002h",
                             "alias": "AP002",
                             "name": "Control de lectura con while(!feof())",
-                            "file": f.name,
+                            "file": _ruta_relativa(f, target_path),
                             "line": idx,
                             "column": 1,
                             "message": "Usar '!feof(f)' como condición del bucle procesa el último registro dos veces.",
@@ -249,7 +302,7 @@ def audit_antipatterns_with_spunkmeyer(
                         "rule_code": "0x300Ah",
                         "alias": "AP001",
                         "name": "Casteo redundante de malloc()",
-                        "file": f.name,
+                        "file": _ruta_relativa(f, target_path),
                         "line": idx,
                         "column": 1,
                         "message": "Castear el retorno de 'malloc()' es innecesario en C.",
@@ -588,38 +641,43 @@ def _in_uncompleted_exercise(path: Path, uncompleted_set: Set[str]) -> bool:
     return bool(uncompleted_set) and (any(part in uncompleted_set for part in path.parts) or path.stem in uncompleted_set)
 
 
+def _hallazgo_de_ripley(h: Dict[str, Any]) -> Dict[str, Any]:
+    """Un hallazgo de la forma común (codigo, mensaje, archivo…) con las claves del informe de dredd."""
+    return {
+        "rule_code": str(h.get("codigo") or "P1"),
+        "rule_name": str(h.get("titulo") or h.get("mensaje") or "Regla P1"),
+        "severity": str(h.get("severidad") or "advertencia").upper(),
+        "message": str(h.get("mensaje") or ""),
+        "suggestion": str(h.get("sugerencia") or ""),
+        "file": str(h.get("archivo") or ""),
+        "line": h.get("linea") or 1,
+        "column": h.get("columna") or 1,
+        "source_plugin": str(h.get("herramienta") or "ripley"),
+    }
+
+
 def _collect_ast_findings(target_path: Path, checks: Any, uncompleted_set: Set[str]) -> List[Dict[str, Any]]:
     """Reglas P1: delega en ripley si está instalado y, si no da hallazgos, usa el linter AST de dredd."""
     findings: List[Dict[str, Any]] = []
     if not checks.ripley_enabled:
         return findings
 
-    # Intentar delegación en ripley satélite si está disponible
+    # Delegación en ripley: su lista `hallazgos` (forma común de yutani) trae la ruta relativa al
+    # directorio donde corre, así que se corre en la raíz de la entrega. Antes se buscaba una clave
+    # `findings` que ripley ya no emite y se filtraban los `hallazgos` por `rule_code`, que la forma
+    # común no tiene: se descartaba todo y se caía siempre al linter por regex de abajo, con falsos
+    # positivos de espaciado (0x0004h en comentarios y `->`, 0x0018h en multiplicaciones, 0x0002h
+    # en firmas de funciones). El respaldo queda sólo para cuando ripley no está o falla.
     ripley_cli = resolve_sibling_cli("ripley")
-    if ripley_cli:
+    if ripley_cli and target_path.is_dir():
         try:
-            cmd = [ripley_cli, "analyze", str(target_path), "--format", "json"]
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            proc = subprocess.run([ripley_cli, "analyze", ".", "--format", "json"], cwd=str(target_path),
+                                  capture_output=True, text=True, timeout=60)
             if proc.returncode in (0, 1) and proc.stdout.strip():
                 data = json.loads(proc.stdout)
-                # `hallazgos` de ripley es la forma común del ecosistema (codigo, mensaje…), no la de
-                # estas observaciones: de ahí solo se toman las que traen rule_code/code.
-                raw_findings = data.get("findings") or [
-                    h for h in data.get("hallazgos") or [] if "rule_code" in h or "code" in h
-                ]
-                for rf in raw_findings:
-                    findings.append({
-                        "rule_code": rf.get("rule_code") or rf.get("code") or "P1",
-                        "rule_name": rf.get("title") or rf.get("rule_name") or "Regla P1",
-                        "severity": rf.get("severity", "ADVERTENCIA"),
-                        "message": rf.get("message", ""),
-                        "suggestion": rf.get("suggestion", ""),
-                        "file": rf.get("file", ""),
-                        "line": rf.get("line", 1),
-                        "column": rf.get("column", 1),
-                    })
-                if findings:
-                    return findings
+                if isinstance(data.get("hallazgos"), list):
+                    return [_hallazgo_de_ripley(h) for h in data["hallazgos"]
+                            if not _in_uncompleted_exercise(Path(str(h.get("archivo") or "")), uncompleted_set)]
         except Exception:
             pass
 
@@ -630,7 +688,7 @@ def _collect_ast_findings(target_path: Path, checks: Any, uncompleted_set: Set[s
             if _in_uncompleted_exercise(cf, uncompleted_set):
                 continue
             try:
-                findings.extend(audit_c_file(cf))
+                findings.extend(audit_c_file(cf, raiz=target_path))
             except Exception:
                 pass
     return findings
@@ -983,7 +1041,7 @@ def _collect_security_findings(target_path: Path) -> List[Dict[str, Any]]:
                     "severity": sf.severity,
                     "message": sf.message,
                     "suggestion": "Eliminá llamadas a funciones del sistema o intentos de evasión de sandbox.",
-                    "file": c_f.name,
+                    "file": _ruta_relativa(c_f, target_path),
                     "line": sf.line,
                     "code_snippet": sf.code_snippet,
                 })

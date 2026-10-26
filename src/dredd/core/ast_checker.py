@@ -172,13 +172,25 @@ def check_regla_0x0001(content: str) -> List[Tuple[str, int]]:
 
 _RE_VAR_MULTIPLE = re.compile(r'\w+\s+\w+\s*,\s*\w+')
 _RE_FOR_START = re.compile(r'^\s*for\s*\(')
-_RE_OPERATORS = re.compile(r'[^\s](\+|-|\*|/|%|==|!=|<=|>=|<|>|&&|\|\||&|\||\^|<<|>>|=)[^\s=]')
-_RE_INC_DEC = re.compile(r'(\+\+|--)')
+# Sólo operadores binarios inequívocos: `*`, `&` y `-` también son puntero, dirección y signo, y `<`
+# `>` aparecen en `->`; con ellos la regla marcaba cada `p->x`, cada `(long long)a * b` y los
+# comentarios `/**`. Se evalúa sobre el código sin comentarios ni cadenas.
+_RE_OPERATORS = re.compile(
+    r'==|!=|<=|>=|&&|\|\||\+=|-=|\*=|/=|%='
+    r'|(?<![=!<>+\-*/%&|^])=(?!=)|(?<!\+)\+(?![+=])|/(?!=)|%(?!=)'
+)
+_RE_OPERANDO_IZQ = re.compile(r'[\w)\]]\s*$')
+_RE_OPERANDO_DER = re.compile(r'^\s*[\w(]')
 _RE_CONTROL_STRUCT = re.compile(r'^\s*\b(if|for|while|switch)\s*\(.*\)')
 _RE_GOTO = re.compile(r'\bgoto\b')
 _RE_FUNC_DEF = re.compile(r'\w+\s+([a-zA-Z_]\w*)\s*\([^)]*\)\s*\{')
 _RE_SNAKE_CASE = re.compile(r'[a-z_][a-z0-9_]*')
-_RE_PTR_SPACING = re.compile(r'\w+\s*\*\s+[a-zA-Z_]')
+# `tipo* nombre` en una declaración o un parámetro (el asterisco pegado al tipo); antes bastaba
+# `a * b` y cualquier multiplicación contaba.
+_RE_PTR_SPACING = re.compile(
+    r'(?:^\s*|[(,]\s*)(?:(?:const|static|unsigned|signed|struct|enum|union|volatile|extern)\s+)*'
+    r'[A-Za-z_]\w*\*+\s+[A-Za-z_]\w*\s*(?=[;=,)\[])'
+)
 _RE_GETS = re.compile(r'\bgets\s*\(')
 
 _GLOBAL_VAR_QUERY: Optional[Query] = None
@@ -209,7 +221,9 @@ def get_global_var_query() -> Query:
 
 def check_regla_0x0002(line: str, line_num: int) -> List[Dict[str, Any]]:
     """Regla 0x0002h: Una declaración de variable por línea."""
-    if _RE_FOR_START.match(line):
+    # En una firma o una llamada (`int f(int a, int b)`, `int d = mcd(a, b);`) las comas separan
+    # parámetros o argumentos, no declaraciones.
+    if _RE_FOR_START.match(line) or "(" in line:
         return []
     if _RE_VAR_MULTIPLE.search(line):
         return [{
@@ -224,8 +238,11 @@ def check_regla_0x0002(line: str, line_num: int) -> List[Dict[str, Any]]:
 
 def check_regla_0x0004(line: str, line_num: int) -> List[Dict[str, Any]]:
     """Regla 0x0004h: Espacio antes y después de cada operador."""
-    if _RE_OPERATORS.search(line):
-        if not _RE_INC_DEC.search(line):
+    for m in _RE_OPERATORS.finditer(line):
+        antes, despues = line[:m.start()], line[m.end():]
+        if not (_RE_OPERANDO_IZQ.search(antes) and _RE_OPERANDO_DER.match(despues)):
+            continue  # unario o fuera de una expresión binaria
+        if not antes.endswith(" ") or not despues.startswith(" "):
             return [{
                 "rule_id": "0x0004h",
                 "line": line_num,
@@ -364,8 +381,44 @@ def check_regla_0xEEEE(content: str) -> List[Dict[str, Any]]:
     return findings
 
 
-def audit_c_file(c_file: Path) -> List[Dict[str, Any]]:
-    """Ejecuta el análisis completo de reglas P1 sobre un archivo C usando Tree-Sitter AST."""
+def _sin_comentarios_ni_cadenas(content: str) -> List[str]:
+    """Las líneas del fuente con comentarios, cadenas y literales de carácter en blanco.
+
+    Conserva la cantidad de líneas y las columnas, para que los números de línea sigan valiendo.
+    """
+    salida: List[str] = []
+    i, n = 0, len(content)
+    while i < n:
+        c = content[i]
+        if content.startswith("/*", i):
+            fin = content.find("*/", i + 2)
+            fin = n if fin < 0 else fin + 2
+        elif content.startswith("//", i):
+            fin = content.find("\n", i)
+            fin = n if fin < 0 else fin
+        elif c in "\"'":
+            fin = i + 1
+            while fin < n and content[fin] not in (c, "\n"):
+                fin += 2 if content[fin] == "\\" else 1
+            fin = min(fin + 1, n)
+            salida.append(c + re.sub(r"[^\n]", " ", content[i + 1:fin - 1]) + content[fin - 1:fin])
+            i = fin
+            continue
+        else:
+            salida.append(c)
+            i += 1
+            continue
+        salida.append(re.sub(r"[^\n]", " ", content[i:fin]))
+        i = fin
+    return "".join(salida).split("\n")
+
+
+def audit_c_file(c_file: Path, raiz: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Ejecuta el análisis completo de reglas P1 sobre un archivo C usando Tree-Sitter AST.
+
+    El `file` de cada hallazgo es la ruta relativa a `raiz` (la raíz de la entrega), para distinguir
+    los `main.c` y `prueba.c` de cada ejercicio; sin `raiz`, el nombre del archivo.
+    """
     try:
         content = c_file.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
@@ -413,11 +466,11 @@ def audit_c_file(c_file: Path) -> List[Dict[str, Any]]:
                 "suggestion": "Los identificadores no deben superar los 31 caracteres para mantener la legibilidad.",
             })
 
-    # Chequeos línea por línea
-    for i, line in enumerate(lines):
+    # Chequeos línea por línea, sobre el código sin comentarios, cadenas ni preprocesador
+    for i, line in enumerate(_sin_comentarios_ni_cadenas(content)):
         line_num = i + 1
-        clean = line.split('//')[0].strip()
-        if not clean:
+        clean = line.strip()
+        if not clean or clean.startswith("#"):
             continue
 
         findings.extend(check_regla_0x0002(line, line_num))
@@ -428,8 +481,12 @@ def audit_c_file(c_file: Path) -> List[Dict[str, Any]]:
         findings.extend(check_regla_0x0018h(line, line_num))
         findings.extend(check_regla_0x001Ch(line, line_num))
 
+    try:
+        nombre = c_file.relative_to(raiz).as_posix() if raiz else c_file.name
+    except ValueError:
+        nombre = c_file.name
     for f in findings:
-        f["file"] = c_file.name
+        f["file"] = nombre
         if "rule_code" not in f and "rule_id" in f:
             f["rule_code"] = f["rule_id"]
         elif "rule_id" not in f and "rule_code" in f:
