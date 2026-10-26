@@ -133,3 +133,17 @@ def test_deckard_sync_con_deckard_viejo_falla_una_vez(tmp_path: Path, monkeypatc
     res = CliRunner().invoke(app, ["deckard", "sync", "e9"])
     assert res.exit_code == 1
     assert not (ws / "guias" / "e9" / "a.ripkg").exists()
+
+
+def test_actividad_duplicada_en_la_raiz_usa_la_de_submissions_dir(tmp_path: Path, monkeypatch, capsys):
+    """F-06: con entregas/entrega_1 y ./entrega_1, el nombre resuelve a la declarada (donde escribe la ingesta)."""
+    from dredd.core.git_ops import resolve_submissions_dir
+
+    ws = _workspace(tmp_path, "mapeos:\n- zip_pattern: '*Entrega #1-1228009.zip'\n  entrega: entrega_1\n")
+    (ws / "entregas" / "entrega_1").mkdir(parents=True)
+    (ws / "entrega_1").mkdir()
+    monkeypatch.chdir(ws)
+    assert resolve_submissions_dir(ws, "entrega_1") == ("entrega_1", (ws / "entregas" / "entrega_1").resolve())
+    assert "también en" in capsys.readouterr().err
+    # una ruta explícita sigue mandando
+    assert resolve_submissions_dir(ws, "./entrega_1")[1] == (ws / "entrega_1").resolve()

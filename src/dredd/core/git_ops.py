@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 import subprocess
+import sys
 from typing import Dict, List, Optional
 
 
@@ -20,6 +21,25 @@ class RepoMetadata:
     recent_commits: List[str] = field(default_factory=list)
 
 
+def _directorio_declarado(ws: Path, slug: str) -> Optional[tuple[str, Path]]:
+    from dredd.core.config import load_dredd_config
+
+    cfg = load_dredd_config(ws)
+    if not cfg or not cfg.workspace.submissions_dir:
+        return None
+    rule = cfg.find_mapping_for_activity(slug) or cfg.find_mapping_for_zip(slug)
+    actividad = rule.entrega if rule else slug
+    canonico = (ws / cfg.workspace.submissions_dir / actividad).resolve()
+    if not canonico.is_dir():
+        return None
+    for otra in (ws / actividad, ws / f"{actividad}-submissions"):
+        if otra.is_dir() and otra.resolve() != canonico:
+            print(f"Aviso: «{actividad}» está en {canonico} y también en {otra.resolve()}; "
+                  f"se usa la de {cfg.workspace.submissions_dir}/ (dredd.yaml). Unificalas para no bifurcar las revisiones.",
+                  file=sys.stderr)
+    return actividad, canonico
+
+
 def resolve_submissions_dir(workspace_dir: Path | str, exercise_or_path: Path | str) -> tuple[str, Path]:
     """Resuelve el nombre de la actividad y la ruta real del directorio de entregas.
 
@@ -31,6 +51,14 @@ def resolve_submissions_dir(workspace_dir: Path | str, exercise_or_path: Path | 
     """
     ws = Path(workspace_dir).resolve()
     raw = Path(exercise_or_path)
+
+    # 0. Un nombre de actividad (no una ruta) se busca primero en el submissions_dir de dredd.yaml,
+    # donde escribe la ingesta: si había otra copia en la raíz, la evaluación y la ingesta
+    # trabajaban sobre árboles distintos (F-06).
+    if not any(sep in str(exercise_or_path) for sep in ("/", "\\")):
+        canonico = _directorio_declarado(ws, str(raw))
+        if canonico is not None:
+            return canonico
 
     # 1. Si es una ruta existente directa (absoluta o relativa a CWD)
     if raw.is_dir():
