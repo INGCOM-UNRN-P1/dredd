@@ -12,12 +12,27 @@ from dredd.core.ripley_client import run_ripley_analysis
 from dredd.cli._base import _unwrap_cli_value, console  # noqa: F401
 
 
+def resolver_plantillas(template_dir: Optional[Path], ws_dir: Path, cfg: Any) -> Path:
+    """Directorio de header.md/footer.md: el de `--template-dir`, o el `plantillas_dir` de dredd.yaml.
+
+    Antes el valor por omisión era `informe/` relativo al directorio actual y `plantillas_dir`
+    no se leía: los informes salían con el encabezado genérico (F-01).
+    """
+    if template_dir is not None:
+        return template_dir
+    raiz = cfg.config_path.parent if cfg.config_path else ws_dir
+    declarado = raiz / cfg.workspace.plantillas_dir
+    if declarado.is_dir():
+        return declarado
+    return ws_dir / "informe"
+
+
 def ejecutar_evaluacion(
     exercise: str,
     student: Optional[str] = None,
     org: str = "INGCOM-UNRN-P1",
     all_students: bool = False,
-    template_dir: Path = Path("informe"),
+    template_dir: Optional[Path] = None,
     tipo_entrega: Optional[str] = None,
     dry_run: bool = False,
     failed_only: bool = False,
@@ -39,8 +54,8 @@ def ejecutar_evaluacion(
     student = _unwrap_cli_value(student, None)
     org = _unwrap_cli_value(org, "INGCOM-UNRN-P1")
     all_students = bool(_unwrap_cli_value(all_students, False))
-    template_dir = _unwrap_cli_value(template_dir, Path("informe"))
-    if not isinstance(template_dir, Path):
+    template_dir = _unwrap_cli_value(template_dir, None)
+    if template_dir is not None and not isinstance(template_dir, Path):
         template_dir = Path(template_dir)
     tipo_entrega = _unwrap_cli_value(tipo_entrega, None)
     dry_run = bool(_unwrap_cli_value(dry_run, False))
@@ -67,6 +82,7 @@ def ejecutar_evaluacion(
         target_path=submissions_dir,
         cli_override=tipo_entrega,
     )
+    template_dir = resolver_plantillas(template_dir, ws_dir, cfg)
 
     target_students = []
     if student:
@@ -284,7 +300,7 @@ def cmd_eval(
     student: Optional[str] = typer.Argument(None, help="Nombre de usuario del estudiante (opcional si se usa --all)."),
     org: str = typer.Option("INGCOM-UNRN-P1", "--org", "-o", help="Organización de GitHub."),
     all_students: bool = typer.Option(False, "--all", "-a", help="Evaluar todos los estudiantes presentes en el workspace."),
-    template_dir: Path = typer.Option(Path("informe"), "--template-dir", "-t", help="Directorio con header.md y footer.md."),
+    template_dir: Optional[Path] = typer.Option(None, "--template-dir", "-t", help="Directorio con header.md y footer.md (por omisión, plantillas_dir de dredd.yaml)."),
     tipo_entrega: Optional[str] = typer.Option(
         None,
         "--tipo-entrega",
@@ -497,7 +513,7 @@ def cmd_evaluate_run(
     student: Optional[str] = typer.Argument(None, help="Nombre de usuario del estudiante (opcional si se usa --all)."),
     org: str = typer.Option("INGCOM-UNRN-P1", "--org", "-o", help="Organización de GitHub."),
     all_students: bool = typer.Option(False, "--all", "-a", help="Evaluar todos los estudiantes presentes en el workspace."),
-    template_dir: Path = typer.Option(Path("informe"), "--template-dir", "-t", help="Directorio con header.md y footer.md."),
+    template_dir: Optional[Path] = typer.Option(None, "--template-dir", "-t", help="Directorio con header.md y footer.md (por omisión, plantillas_dir de dredd.yaml)."),
     tipo_entrega: Optional[str] = typer.Option(
         None,
         "--tipo-entrega",
