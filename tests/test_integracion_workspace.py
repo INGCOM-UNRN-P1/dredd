@@ -59,3 +59,21 @@ def test_plagio_usa_el_umbral_de_dredd_yaml(tmp_path: Path, monkeypatch):
     res = runner.invoke(app, ["plagiarism", "TP0", "--threshold", "0.8"])
     assert res.exit_code == 0, res.output
     assert llamadas == [(0.55, False), (0.8, False)]
+
+
+def test_fuzz_gen_resuelve_la_solucion_modelo_del_banco(tmp_path: Path, monkeypatch):
+    import pytest
+    import typer
+
+    from dredd.cli.analisis import resolver_modelo
+
+    (tmp_path / "banco" / "contador-digitos").mkdir(parents=True)
+    solucion = tmp_path / "banco" / "contador-digitos" / "solucion.c"
+    solucion.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    (tmp_path / "ws").mkdir()
+    ws = _workspace(tmp_path / "ws", "  deckard_bank_dir: ../banco\n")
+    assert resolver_modelo("contador-digitos", ws).resolve() == solucion.resolve()
+    assert resolver_modelo(str(solucion), ws) == solucion
+    with pytest.raises(typer.Exit) as exc:
+        resolver_modelo("no-existe", ws)
+    assert exc.value.exit_code == 2

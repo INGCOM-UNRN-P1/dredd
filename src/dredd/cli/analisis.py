@@ -105,9 +105,24 @@ def cmd_map(
     console.print(f"[bold green]✓ Sesión finalizada: {changes} mapeo(s) actualizados.[/bold green]")
 
 
+def resolver_modelo(modelo: str, workspace_dir: Optional[Path] = None) -> Path:
+    """La solución modelo: una ruta a un .c, o `<banco>/<id>/solucion.c` con el banco de dredd.yaml."""
+    ruta = Path(modelo)
+    if ruta.is_file():
+        return ruta
+    from dredd.core.config import load_dredd_config
+    cfg = load_dredd_config(workspace_dir or Path.cwd())
+    banco = cfg.banco_deckard() if cfg else None
+    if banco is not None and (banco / modelo / "solucion.c").is_file():
+        return banco / modelo / "solucion.c"
+    donde = f" ni es un ejercicio del banco {banco}" if banco else " (y dredd.yaml no declara workspace.deckard_bank_dir)"
+    _err.print(f"[bold red]Error:[/bold red] «{modelo}» no es un archivo{donde}.")
+    raise typer.Exit(code=2)
+
+
 def fuzz_gen(
-    modelo: Path = typer.Argument(..., exists=True, dir_okay=False,
-                                  help="Solución modelo de la cátedra (.c)."),
+    modelo_arg: str = typer.Argument(..., metavar="MODELO",
+                                     help="Solución modelo de la cátedra (.c) o id de un ejercicio del banco de deckard."),
     salida: Path = typer.Option(Path("casos"), "--salida", "-o",
                                 help="Directorio destino de los pares caso_NN.in/.out."),
     spec: Optional[Path] = typer.Option(None, "--spec", help="spec.yaml opcional (tipo_entrada, semillas_extra, tamano_max)."),
@@ -123,6 +138,7 @@ def fuzz_gen(
     para fijar la salida esperada; duplicados y crashes se reportan aparte.
     """
     _aviso_traslado("fuzz-gen", "drake gen-casos")
+    modelo = resolver_modelo(modelo_arg)
     try:  # con el extra `ecosistema`, el generador de drake (el dueño del fuzzing)
         from drake.core.generar_casos import generar_testcases
     except ImportError:
