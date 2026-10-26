@@ -32,3 +32,30 @@ def test_plantillas_explicitas_ganan(tmp_path: Path):
 
 def test_plantillas_sin_directorio_declarado_usan_informe(tmp_path: Path):
     assert resolver_plantillas(None, tmp_path, DreddConfig()) == tmp_path / "informe"
+
+
+def test_plagio_usa_el_umbral_de_dredd_yaml(tmp_path: Path, monkeypatch):
+    """F-04: sin --threshold vale checks.plagiarism.threshold; con strip_boilerplate: false no se quita _baseline."""
+    from typer.testing import CliRunner
+
+    from dredd.cli import app
+    from dredd.core import plagiarism
+
+    ws = _workspace(tmp_path, "checks:\n  plagiarism:\n    threshold: 0.55\n    strip_boilerplate: false\n")
+    (ws / "entregas" / "TP0" / "a").mkdir(parents=True)
+    llamadas = []
+    original = plagiarism.PlagiarismDetector.analyze_submissions
+
+    def espiar(self, submissions_dir, threshold=None, plantilla=None, buscar_plantilla=True):
+        llamadas.append((self.threshold, buscar_plantilla))
+        return original(self, submissions_dir, threshold, plantilla, buscar_plantilla)
+
+    monkeypatch.setattr(plagiarism.PlagiarismDetector, "analyze_submissions", espiar)
+    monkeypatch.chdir(ws)
+    runner = CliRunner()
+    res = runner.invoke(app, ["plagiarism", "TP0"])
+    assert res.exit_code == 0, res.output
+    assert "55%" in res.output
+    res = runner.invoke(app, ["plagiarism", "TP0", "--threshold", "0.8"])
+    assert res.exit_code == 0, res.output
+    assert llamadas == [(0.55, False), (0.8, False)]

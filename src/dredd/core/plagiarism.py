@@ -147,8 +147,10 @@ class PlagiarismDetector:
         return (2.0 * intersection) / (len(fps_a) + len(fps_b))
 
     def analyze_submissions(self, submissions_dir: Path, threshold: Optional[float] = None,
-                            plantilla: Optional[Path] = None) -> List[SimilarityMatch]:
-        if plantilla is None:
+                            plantilla: Optional[Path] = None,
+                            buscar_plantilla: bool = True) -> List[SimilarityMatch]:
+        """`buscar_plantilla=False` (strip_boilerplate: false) no usa el `_baseline` encontrado solo."""
+        if plantilla is None and buscar_plantilla:
             try:
                 from dredd.core.baseline import find_baseline_dir
                 b_dir = find_baseline_dir(submissions_dir)

@@ -21,7 +21,8 @@ def _aviso_traslado(comando: str, reemplazo: str) -> None:
 
 def cmd_plagiarism(
     exercise: str = typer.Argument(..., help="Nombre de la actividad o directorio de entregas a auditar."),
-    threshold: float = typer.Option(0.60, "--threshold", "-th", help="Umbral de similitud mínima (0.0 a 1.0)."),
+    threshold: Optional[float] = typer.Option(None, "--threshold", "-th",
+        help="Umbral de similitud mínima (0.0 a 1.0). Por omisión, checks.plagiarism.threshold de dredd.yaml (0.60 sin él)."),
     strip_template: Optional[Path] = typer.Option(None, "--strip-template",
         help="boiler-strip: plantilla/archivo(s) de cátedra a eliminar antes de calcular similitud."),
     html: Optional[Path] = typer.Option(None, "--html", help="Ruta del reporte HTML interactivo con matriz y diff lado a lado."),
@@ -32,11 +33,21 @@ def cmd_plagiarism(
         console.print(f"[bold red]Directorio inexistente: {submissions_dir}[/bold red]")
         raise typer.Exit(code=1)
 
+    # La política de la cátedra está en dredd.yaml; antes se ignoraba y valía siempre 0.60 (F-04).
+    from dredd.core.config import load_dredd_config
+    cfg = load_dredd_config(Path.cwd()) or load_dredd_config(submissions_dir)
+    if threshold is None:
+        threshold = cfg.checks.plagiarism_threshold if cfg else 0.60
+    quitar_plantilla = cfg.checks.plagiarism_strip_boilerplate if cfg else True
+    console.print(f"[dim]Umbral de similitud: {threshold*100:.0f}%[/dim]")
+
     if strip_template:
         console.print(f"[dim]boiler-strip activo contra: {strip_template}[/dim]")
+    elif not quitar_plantilla:
+        console.print("[dim]boiler-strip desactivado (checks.plagiarism.strip_boilerplate: false)[/dim]")
 
     detector = PlagiarismDetector(threshold=threshold, plantilla=strip_template)
-    matches = detector.analyze_submissions(submissions_dir)
+    matches = detector.analyze_submissions(submissions_dir, buscar_plantilla=quitar_plantilla)
 
     if not matches:
         console.print(f"\n[bold green]✓ No se detectaron pares con similitud superior al {threshold*100:.0f}%.[/bold green]\n")
