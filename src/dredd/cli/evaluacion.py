@@ -430,7 +430,7 @@ def ejecutar_limpieza_evaluaciones(
         console.print(f"[bold green]✓ Limpieza de evaluaciones completada en:[/bold green] [cyan]{target_dir}[/cyan]")
 
     if rni_count == 0 and inf_count == 0:
-        console.print("[dim]No se encontraron evaluaciones previas (directorios rNi ni informes) para limpiar.[/dim]")
+        console.print("[dim]No se encontraron evaluaciones previas (directorios rNi o i_<hash> ni informes) para limpiar.[/dim]")
         return
 
     console.print(f"  • [bold]Directorios rNi {'a eliminar' if dry_run else 'eliminados'}:[/bold] [cyan]{rni_count}[/cyan]")

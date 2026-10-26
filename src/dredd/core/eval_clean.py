@@ -9,14 +9,21 @@ import shutil
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 
-# Carpetas de revisiones internas generadas por las herramientas (r1i, r2i, r10i, etc.)
-PATRON_DIR_RNI = re.compile(r"^r\d+i$", re.IGNORECASE)
+# Carpetas de revisiones internas generadas por las herramientas: r1i, r2i, r10i (Moodle) e
+# i_<hash> (repos de GitHub; `latest` si el repo no tenía commits legibles).
+PATRON_DIR_RNI = re.compile(r"^(?:r\d+i|i_(?:[0-9a-f]{7,40}|latest))$", re.IGNORECASE)
 
 # Informes consolidados, logs de compilación y exportaciones generadas por Dredd
 PATRON_ARCHIVO_INFORME = re.compile(
-    r"^(?:.+_r\d+.*|informe(?:_.*)?|alumno_r\d+.*|feedback_.*|devolucion_.*|compilacion_r\d+.*|compile_r\d+.*)\.(?:md|html|pdf|log|txt)$",
+    r"^(?:.+_r\d+.*|informe(?:_.*)?|alumno_r\d+.*|feedback_.*|devolucion_.*|compilacion_r\d+.*|compile_r\d+.*"
+    r"|compilacion_[0-9a-f]{7,40})\.(?:md|html|pdf|log|txt)$",
     re.IGNORECASE,
 )
+
+# En GitHub el informe es <alumno>_<hash>.md (y <alumno>_<hash>_compilacion.log): un sufijo
+# hexadecimal suelto también puede ser parte de un nombre cualquiera, así que sólo se reconoce
+# con el nombre de la carpeta del alumno como prefijo.
+_SUFIJO_REVISION_GITHUB = r"_(?:[0-9a-f]{7,40}|latest)(?:_[a-z0-9_]+)?\.(?:md|html|pdf|log|txt)$"
 
 # Archivos protegidos que jamás deben ser eliminados bajo ninguna circunstancia
 ARCHIVOS_PROTEGIDOS: Set[str] = {
@@ -36,8 +43,11 @@ def es_directorio_rni(path: Path) -> bool:
     return path.is_dir() and bool(PATRON_DIR_RNI.match(path.name))
 
 
-def es_archivo_informe(path: Path) -> bool:
-    """Indica si el archivo corresponde a un reporte generado por Dredd."""
+def es_archivo_informe(path: Path, alumno: Optional[str] = None) -> bool:
+    """Indica si el archivo corresponde a un reporte generado por Dredd.
+
+    `alumno` (el nombre de su carpeta) habilita los informes de GitHub, `<alumno>_<hash>.md`.
+    """
     if not path.is_file():
         return False
     nombre_lower = path.name.lower()
@@ -45,7 +55,9 @@ def es_archivo_informe(path: Path) -> bool:
         return False
     if nombre_lower.endswith((".c", ".h", ".yaml", ".yml", ".json", ".in", ".out")):
         return False
-    return bool(PATRON_ARCHIVO_INFORME.match(path.name))
+    if PATRON_ARCHIVO_INFORME.match(path.name):
+        return True
+    return bool(alumno) and re.match(re.escape(alumno) + _SUFIJO_REVISION_GITHUB, path.name, re.IGNORECASE) is not None
 
 
 def _obtener_tamano_directorio(dir_path: Path) -> int:
@@ -93,7 +105,7 @@ def limpiar_evaluaciones_estudiante(
     # 2. Buscar archivos de informe en student_dir y en rN/rN_f
     if limpiar_informes:
         for item in list(student_dir.iterdir()):
-            if es_archivo_informe(item):
+            if es_archivo_informe(item, alumno=student_dir.name):
                 informes_encontrados.append(item)
             elif item.is_dir() and re.match(r"^r\d+(?:_f)?$", item.name, re.IGNORECASE):
                 for sub in item.iterdir():

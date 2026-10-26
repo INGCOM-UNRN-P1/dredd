@@ -188,3 +188,24 @@ def test_cli_eval_flag_clean_and_force(tmp_path: Path, monkeypatch):
     assert not (a1 / "alumno_y_r1.md").exists()
     assert len(called) == 2
 
+
+
+def test_limpieza_de_entregas_github(tmp_path: Path):
+    """F-02: en GitHub dredd deja i_<hash>/, <alumno>_<hash>.md y compilacion_<hash>.log."""
+    alumno = tmp_path / "TP0" / "TP0-facubnv"
+    (alumno / "repo").mkdir(parents=True)
+    (alumno / "repo" / "notas_b763cc8.md").write_text("del alumno", encoding="utf-8")
+    (alumno / "i_b763cc8").mkdir()
+    (alumno / "i_b763cc8" / "auditoria.json").write_text("{}", encoding="utf-8")
+    generados = ["TP0-facubnv_b763cc8.md", "TP0-facubnv_b763cc8_compilacion.log", "compilacion_b763cc8.log"]
+    for nombre in generados:
+        (alumno / nombre).write_text("x", encoding="utf-8")
+    (alumno / "otro_cafe123.md").write_text("no es de dredd", encoding="utf-8")
+
+    res = limpiar_evaluaciones(tmp_path / "TP0", dry_run=True)
+    assert [d.name for d in res["directorios_rni"]] == ["i_b763cc8"]
+    assert sorted(f.name for f in res["informes"]) == sorted(generados)
+
+    limpiar_evaluaciones(tmp_path / "TP0")
+    assert sorted(p.name for p in alumno.iterdir()) == ["otro_cafe123.md", "repo"]
+    assert (alumno / "repo" / "notas_b763cc8.md").is_file()
