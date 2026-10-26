@@ -69,11 +69,17 @@ dredd eval tp01 alvarez_juan
 # Evaluar toda la cohorte presente en el workspace
 dredd eval tp01 --all
 
-# Limpiar evaluaciones previas (carpetas rNi e informes generados)
+# Limpiar evaluaciones previas (rNi/ o i_<hash>/ e informes generados)
 dredd evaluate clean tp01
 dredd evaluate clean tp01 alvarez_juan
 dredd evaluate clean tp01 --dry-run   # Simulación sin borrar
 ```
+
+Del `dredd.yaml` del workspace, la evaluación toma el encabezado y el pie de los informes
+(`workspace.plantillas_dir`, `header.md` y `footer.md`; `--template-dir` los reemplaza) y
+completa los ejercicios de la guía que no tienen `.ripkg` desde el banco de deckard
+(`workspace.deckard_bank_dir`: `<banco>/<id>/ejercicio.yaml`, `solucion.c`, `tests/`).
+`dredd config validate` lista los ejercicios que quedan sin casos de prueba de la cátedra.
 
 #### Publicación de Feedback en GitHub (`dredd comment`)
 Envía automáticamente el informe `${estudiante}.md` como comentario en el Pull Request abierto del estudiante utilizando GitHub CLI (`gh`):
@@ -126,6 +132,7 @@ dredd moodle export -e tp01 -o calificaciones.csv
 Calcula la matriz de similitud de código fuente normalizado en todas las entregas descargadas utilizando el algoritmo Winnowing:
 
 ```bash
+dredd plagiarism tp01_1228009                    # umbral de checks.plagiarism.threshold (dredd.yaml)
 dredd plagiarism tp01_1228009 --threshold 0.70
 ```
 
@@ -299,7 +306,8 @@ src/dredd/
 | `dredd map` | Mapeo interactivo y heurístico entre archivos C de estudiantes y especificaciones de la guía. |
 | `dredd export` | Exporta calificaciones CSV, paquete ZIP de retroalimentación y dashboard consolidado de cohorte. |
 | `dredd export-report` | Convierte un informe Markdown a HTML autocontenido enriquecido o PDF (zero-dependencies). |
-| `dredd fuzz-gen` | fuzz-gen: endurece el banco generando casos límite contra la solución modelo. |
+| `dredd fuzz-gen` | fuzz-gen: endurece el banco generando casos límite contra la solución modelo (un `.c` o el id de un ejercicio del banco de deckard). |
+| `dredd deckard sync` | Empaqueta con `deckard export pack` los ejercicios de la guía que están en el banco (`workspace.deckard_bank_dir`). |
 | `dredd oral-guide` | oral-exam-companion: genera una guía de preguntas para coloquio/defensa. |
 | `dredd multiplex` | Alias docente de conveniencia que delega la generación de variantes y asignación en Deckard. |
 | `dredd doctor` | Verifica dependencias externas del sistema (GCC, Valgrind, Bubblewrap, Git, Ripley). |
