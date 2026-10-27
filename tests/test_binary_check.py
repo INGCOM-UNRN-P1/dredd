@@ -163,3 +163,18 @@ def test_binario_versionado_ya_purgado_se_sigue_informando(tmp_path: Path):
 
     assert [f["file"] for f in audit_and_purge_binaries_from_dir(repo)] == ["output/ej1.exe"]
     assert [f["file"] for f in audit_and_purge_binaries_from_dir(repo)] == ["output/ej1.exe"]
+
+
+def test_binarios_md_de_una_evaluacion_anterior_no_sobrevive(tmp_path: Path):
+    """La re-evaluación sin binarios borra el binarios.md viejo: si no, el informe consolidado
+    (que incluye todo lo que hay en rNi) seguía mostrando los binarios de la corrida anterior."""
+    rni_dir = tmp_path / "i_38cb8be"
+    rni_dir.mkdir()
+    (rni_dir / "binarios.md").write_text("## ⚠️ Archivos Binarios Prohibidos Filtrados\n", encoding="utf-8")
+    (rni_dir / "para_repasar.md").write_text("# Para repasar\n", encoding="utf-8")
+
+    generated = write_individual_tool_reports(rni_dir, {"binary_findings": []})
+
+    assert "binarios" not in generated
+    assert not (rni_dir / "binarios.md").exists()
+    assert (rni_dir / "para_repasar.md").exists()  # lo escribe cohorte, no esta función

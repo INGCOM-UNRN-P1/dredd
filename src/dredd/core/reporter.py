@@ -590,6 +590,12 @@ def _informe_preguntas_orales(analysis, generated, rni_dir) -> None:
 
 
 
+_SECCIONES_PROPIAS = (
+    "resumen.md", "binarios.md", "daedalus.md", "ripley.md", "kaneda.md", "spunkmeyer.md",
+    "tests.md", "valgrind.md", "gaff.md", "similarity.md", "oral_questions.md",
+)
+
+
 def write_individual_tool_reports(
     rni_dir: Path,
     analysis: Dict[str, Any],
@@ -598,6 +604,10 @@ def write_individual_tool_reports(
 ) -> Dict[str, Path]:
     """Genera los informes individuales en Markdown para cada herramienta en el directorio rNi."""
     rni_dir.mkdir(parents=True, exist_ok=True)
+    # Una sección que esta corrida no genera (p. ej. binarios.md cuando ya no hay binarios) no debe
+    # sobrevivir de una evaluación anterior: el informe consolidado incluye todo lo que hay en rNi.
+    for nombre in _SECCIONES_PROPIAS:
+        (rni_dir / nombre).unlink(missing_ok=True)
     generated: Dict[str, Path] = {}
 
     # 0. Resumen de Evaluación por Archivo (resumen.md)
