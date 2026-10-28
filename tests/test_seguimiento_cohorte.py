@@ -2,6 +2,7 @@
 
 import csv
 import json
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -53,7 +54,14 @@ def test_planilla_de_la_cohorte(tmp_path):
     assert por_alumno["caro"]["commits"] == 0  # el commit del bot de Classroom no cuenta
     assert informe["frecuentes"][0]["codigo"] == "0x1006h"
 
-    csv_, md, js = escribir(informe, tmp_path / "salida")
+    # Índice por concepto sobre las entregas analizadas (ni la vacía ni... la que no compila también cuenta).
+    assert informe["analizadas"] == 3
+    assert [(t["categoria"], t["alumnos"], t["porcentaje"]) for t in informe["temas"]] == [("control", 1, 33.3)]
+
+    csv_, md, js, conceptos = escribir(informe, tmp_path / "salida")
+    anonimo = conceptos.read_text(encoding="utf-8")
+    assert "33.3 %" in anonimo and "1/3" in anonimo
+    assert not re.search(r"\b(ana|beto|caro|dani)\b|tp1-", anonimo)
     filas = list(csv.DictReader(csv_.open(encoding="utf-8")))
     assert [f["alumno"] for f in filas] == ["ana", "beto", "caro", "dani"]
     texto = md.read_text(encoding="utf-8")

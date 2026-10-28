@@ -137,7 +137,11 @@ def analizar_cohorte(carpeta: Path, ruta: str = ".", perfil: str = "strict", pre
         entrega, propios = analizar_repo(repo, alumno.lstrip("-_"), ruta, perfil, ripley, fecha_limite)
         entregas.append(entrega)
         hallazgos[entrega.alumno] = propios
+    from dredd.core.cohorte import agrupar
+
     estados = Counter(e.estado for e in entregas)
+    analizadas = {a: h for a, h in hallazgos.items()
+                  if next(e for e in entregas if e.alumno == a).estado not in ("sin entrega", "error al analizar")}
     return {
         "schema_version": "1.0.0",
         "generado": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -145,6 +149,9 @@ def analizar_cohorte(carpeta: Path, ruta: str = ".", perfil: str = "strict", pre
         "fecha_limite": fecha_limite.isoformat() if fecha_limite else None,
         "totales": {estado: estados.get(estado, 0) for estado in ESTADOS} | {"alumnos": len(entregas)},
         "frecuentes": frecuentes(hallazgos),
+        # Índice de error por concepto: % de las entregas analizadas con al menos un hallazgo del tema.
+        "temas": agrupar(analizadas)["temas"],
+        "analizadas": len(analizadas),
         "entregas": [asdict(e) for e in entregas],
     }
 
@@ -155,7 +162,7 @@ _COLUMNAS = ["alumno", "repo", "estado", "compila", "errores", "advertencias", "
 
 def escribir(informe: Dict[str, Any], salida: Path) -> Sequence[Path]:
     salida.mkdir(parents=True, exist_ok=True)
-    rutas = [salida / "cohorte.csv", salida / "cohorte.md", salida / "cohorte.json"]
+    rutas = [salida / "cohorte.csv", salida / "cohorte.md", salida / "cohorte.json", salida / "conceptos.md"]
     with rutas[0].open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=_COLUMNAS)
         w.writeheader()
@@ -163,7 +170,33 @@ def escribir(informe: Dict[str, Any], salida: Path) -> Sequence[Path]:
             w.writerow({**{k: e.get(k) for k in _COLUMNAS}, "reglas": " ".join(e.get("reglas", []))})
     rutas[1].write_text(markdown(informe), encoding="utf-8")
     rutas[2].write_text(json.dumps(informe, indent=2, ensure_ascii=False), encoding="utf-8")
+    rutas[3].write_text(conceptos_markdown(informe), encoding="utf-8")
     return rutas
+
+
+def _tabla_conceptos(informe: Dict[str, Any]) -> List[str]:
+    if not informe.get("temas"):
+        return []
+    lineas = ["| Concepto | Alumnos | Índice de error | Apunte |", "| :-- | :-: | :-: | :-- |"]
+    for t in informe["temas"]:
+        lineas.append(f"| {_celda(t.get('descripcion') or t['categoria'])} | {t['alumnos']}/{informe.get('analizadas', '?')} | "
+                      f"{t['porcentaje']} % | {('[' + t['categoria'] + '](' + t['enlace'] + ')') if t.get('enlace') else '—'} |")
+    return lineas
+
+
+def conceptos_markdown(informe: Dict[str, Any]) -> str:
+    """Informe anónimo (sin nombres ni repos): qué conceptos reforzar en clase. Se puede compartir
+    con todo el equipo docente aunque no tenga acceso a las entregas."""
+    lineas = ["# Conceptos para reforzar", "",
+              f"{informe.get('analizadas', 0)} entregas analizadas · {informe['generado'][:10]} · perfil `{informe['perfil']}`", "",
+              "El índice de error es el porcentaje de entregas con al menos una observación del concepto.", ""]
+    lineas += _tabla_conceptos(informe) or ["Sin observaciones."]
+    if informe.get("frecuentes"):
+        lineas += ["", "## Reglas más incumplidas", "", "| Regla | Alumnos | Mensaje |", "| :-- | :-: | :-- |"]
+        for f in informe["frecuentes"]:
+            regla = f"[{f['codigo']}]({f['enlace']})" if f.get("enlace") else f"`{f['codigo']}`"
+            lineas.append(f"| {regla} | {f['alumnos']} | {_celda(f.get('mensaje'))} |")
+    return "\n".join(lineas) + "\n"
 
 
 def _celda(valor: Any) -> str:
@@ -178,6 +211,8 @@ def markdown(informe: Dict[str, Any]) -> str:
               "| Aprobadas | Con errores | No compilan | Sin entrega | Error al analizar |",
               "| :-: | :-: | :-: | :-: | :-: |",
               f"| {t['aprobada']} | {t['con errores']} | {t['no compila']} | {t['sin entrega']} | {t['error al analizar']} |", ""]
+    if informe.get("temas"):
+        lineas += ["## Conceptos para reforzar", "", *_tabla_conceptos(informe), ""]
     if informe["frecuentes"]:
         lineas += ["## Observaciones más frecuentes", "", "| Regla | Alumnos | Tema | Mensaje |", "| :-- | :-: | :-- | :-- |"]
         for f in informe["frecuentes"]:

@@ -100,20 +100,30 @@ def ultimas_revisiones(raiz: Path) -> Dict[Path, Path]:
 def agrupar_cohorte(raiz: Path) -> Dict[str, Any]:
     """Errores por cohorte: cuántos estudiantes distintos tuvieron cada error y cada tema. De cada
     estudiante cuenta su última revisión (el `rNi` más alto)."""
-    ultima = ultimas_revisiones(raiz)
+    hallazgos: Dict[Any, List[Dict[str, Any]]] = {}
+    for alumno, archivo in ultimas_revisiones(raiz).items():
+        try:
+            hallazgos[alumno] = json.loads(archivo.read_text(encoding="utf-8")).get("hallazgos", [])
+        except (OSError, ValueError):
+            hallazgos[alumno] = []
+    return agrupar(hallazgos)
+
+
+def agrupar(hallazgos_por_alumno: Dict[Any, List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """Cuántos alumnos distintos tuvieron cada error y cada tema, y qué porcentaje de la cohorte
+    son (el índice de error de cada concepto). Sin nombres: sirve como informe anónimo. Lo usan
+    `cluster-errors` (workspace de corrección) y `cohorte` (repos de Classroom)."""
     por_id: Dict[str, set] = defaultdict(set)
     por_categoria: Dict[str, set] = defaultdict(set)
     info: Dict[str, Dict[str, Any]] = {}
-    for alumno, archivo in ultima.items():
-        try:
-            hallazgos = json.loads(archivo.read_text(encoding="utf-8")).get("hallazgos", [])
-        except (OSError, ValueError):
-            continue
+    for alumno, hallazgos in hallazgos_por_alumno.items():
         for h in hallazgos:
-            por_id[h["id"]].add(alumno)
-            por_categoria[h["categoria"]].add(alumno)
-            info.setdefault(h["id"], {"categoria": h["categoria"], "enlace": h.get("enlace"), "ejemplo": h.get("mensaje", "")})
-    total = len(ultima)
+            ident = str(h.get("id") or f"{h.get('herramienta', 'ripley')}:{h.get('codigo')}")
+            categoria = str(h.get("categoria")) if h.get("categoria") in CATEGORIAS else "estilo"
+            por_id[ident].add(alumno)
+            por_categoria[categoria].add(alumno)
+            info.setdefault(ident, {"categoria": categoria, "enlace": h.get("enlace"), "ejemplo": h.get("mensaje", "")})
+    total = len(hallazgos_por_alumno)
     errores = [{"id": i, "alumnos": len(a), "porcentaje": round(100 * len(a) / total, 1) if total else 0.0, **info[i]}
                for i, a in por_id.items()]
     temas = [{"categoria": c, "descripcion": CATEGORIAS[c][0], "alumnos": len(a),
