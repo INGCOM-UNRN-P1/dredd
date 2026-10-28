@@ -18,6 +18,10 @@ import yaml
 logger = logging.getLogger("dredd.config")
 
 
+# Temas de actividad (los de los perfiles de ripley) cuyas entregas son TDAs: corre motoko (Ola 17).
+TEMAS_CON_TDA = frozenset({"tad", "tda", "modulos"})
+
+
 @dataclass
 class ToolChecksConfig:
     """Configuración de verificaciones de herramientas pedagógicas y estáticas."""
@@ -79,6 +83,10 @@ class ToolChecksConfig:
     drake_enabled: bool = True
     fuzz_boundary_limits: bool = True
 
+    # Motoko / Encapsulamiento de TDAs (Ola 17): apagado salvo en las actividades de TDAs (el `tema`
+    # del mapeo, ver TEMAS_CON_TDA) o si se activa en `checks.motoko`.
+    motoko_enabled: bool = False
+
     # Sandbox
     sandbox_memory_mb: int = 64
     sandbox_timeout_seconds: float = 5.0
@@ -125,6 +133,7 @@ class ToolChecksConfig:
             detect_unfreed_allocations=True,
             drake_enabled=True,
             fuzz_boundary_limits=True,
+            motoko_enabled=True,
             sandbox_memory_mb=32,
             sandbox_timeout_seconds=3.0,
             fail_on_memory_leak=True,
@@ -146,6 +155,7 @@ class ToolChecksConfig:
         brett_data = data.get("brett", {})
         bishop_data = data.get("bishop", {})
         drake_data = data.get("drake", {})
+        motoko_data = data.get("motoko", {})
         sand_data = data.get("sandbox", {})
         plag_data = data.get("plagiarism", {})
 
@@ -182,6 +192,7 @@ class ToolChecksConfig:
             detect_unfreed_allocations=bishop_data.get("detect_unfreed_allocations", True),
             drake_enabled=drake_data.get("enabled", True),
             fuzz_boundary_limits=drake_data.get("fuzz_boundary_limits", True),
+            motoko_enabled=bool(motoko_data.get("enabled", data.get("motoko_enabled", False))),
             sandbox_memory_mb=int(sand_data.get("max_memory_mb", data.get("sandbox_memory_mb", 64))),
             sandbox_timeout_seconds=float(sand_data.get("timeout_seconds", data.get("sandbox_timeout_seconds", 5.0))),
             fail_on_memory_leak=sand_data.get("fail_on_memory_leak", True),
@@ -236,6 +247,7 @@ class ToolChecksConfig:
                 "enabled": self.bishop_enabled,
                 "detect_unfreed_allocations": self.detect_unfreed_allocations,
             },
+            "motoko": {"enabled": self.motoko_enabled},
             "drake": {
                 "enabled": self.drake_enabled,
                 "fuzz_boundary_limits": self.fuzz_boundary_limits,
@@ -301,6 +313,9 @@ class MappingRule:
     descripcion: str = ""
     plantilla: Optional[str] = None
     checks: Optional[Dict[str, Any]] = None
+    # Tema de la actividad, con el vocabulario de los perfiles de ripley (`tad`, `punteros`…): el perfil
+    # de TDAs suma motoko (Ola 17).
+    tema: Optional[str] = None
     mode: Optional[str] = None  # "archivos_individuales", "makefiles_individuales", "proyecto"
     source: str = "moodle"      # "moodle" o "github"
     github_org: Optional[str] = None
@@ -467,11 +482,13 @@ class DreddConfig:
             return self.checks
 
         rule = self.find_mapping_for_activity(activity_slug)
-        if not rule or not rule.checks:
+        if not rule or (not rule.checks and not rule.tema):
             return self.checks
 
         merged = dict(global_dict)
-        for tool, tool_overrides in rule.checks.items():
+        if rule.tema and rule.tema.strip().lower() in TEMAS_CON_TDA:
+            merged["motoko"] = {**merged.get("motoko", {}), "enabled": True}
+        for tool, tool_overrides in (rule.checks or {}).items():
             if isinstance(tool_overrides, dict) and tool in merged:
                 merged[tool].update(tool_overrides)
             else:
@@ -515,6 +532,8 @@ class DreddConfig:
                 item["mode"] = m.mode
             if m.descripcion:
                 item["descripcion"] = m.descripcion
+            if m.tema:
+                item["tema"] = m.tema
             if m.checks:
                 item["checks"] = m.checks
             if m.source and m.source != "moodle":
@@ -600,6 +619,7 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
                                     descripcion=m.get("descripcion", ""),
                                     plantilla=m.get("plantilla"),
                                     checks=m.get("checks"),
+                                    tema=m.get("tema"),
                                     mode=m.get("mode") or m.get("tipo_entrega"),
                                     source=m.get("source", "moodle"),
                                     github_org=m.get("github_org"),

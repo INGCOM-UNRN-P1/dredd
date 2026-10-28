@@ -1026,6 +1026,52 @@ def _analyze_individual_files(
     }
 
 
+def _carpetas_de_tdas(target_path: Path, uncompleted_set: Set[str]) -> List[Path]:
+    """Dónde auditar los TDAs: cada ejercicio completado (un TDA por ejercicio, como en las guías) o, si
+    la entrega no tiene ejercicios, la entrega entera."""
+    ejercicios = sorted({d for patron in ("ejercicio*", "ejercicios/ejercicio*") for d in target_path.glob(patron)
+                         if d.is_dir() and d.name != "ejercicios" and d.name not in uncompleted_set})
+    return ejercicios or [target_path]
+
+
+def _collect_motoko(target_path: Path, uncompleted_set: Set[str]) -> Dict[str, Any]:
+    """Encapsulamiento de los TDAs con `motoko check --json` (Ola 17): hallazgos y resumen por TDA.
+
+    motoko saltea libs/ (la biblioteca de la cátedra) y empareja `pila.h` con `pila.c`. Sus errores
+    (un acceso a un campo privado, el struct privado copiado en el cliente) descuentan en el criterio
+    de diseño de la rúbrica de deckard, que los toma de hallazgos.json."""
+    motoko_cli = resolve_sibling_cli("motoko")
+    if not motoko_cli:
+        return {"disponible": False, "findings": [], "resumen": [], "tdas": 0}
+    findings: List[Dict[str, Any]] = []
+    resumen: List[str] = []
+    tdas = 0
+    for carpeta in _carpetas_de_tdas(target_path, uncompleted_set):
+        try:
+            proc = subprocess.run([motoko_cli, "check", str(carpeta), "--json"], capture_output=True, text=True,
+                                  timeout=120)
+            data = json.loads(proc.stdout)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        tdas += len(data.get("tdas_analyzed") or [])
+        resumen.extend(str(r) for r in data.get("resumen") or [])
+        for v in data.get("violations") or []:
+            findings.append({
+                "rule_code": v.get("code"),
+                "rule_name": f"[TDA] {v.get('tda_name')}",
+                "severity": str(v.get("severity") or "WARNING").upper(),
+                "message": v.get("message") or "",
+                "suggestion": v.get("suggestion") or "",
+                "file": _ruta_relativa(Path(v.get("file_path") or ""), target_path),
+                "line": v.get("line_number") or 1,
+                "code_snippet": v.get("line_content") or "",
+                "source_plugin": "motoko",
+            })
+    return {"disponible": True, "findings": findings, "resumen": resumen, "tdas": tdas}
+
+
 def _collect_security_findings(target_path: Path) -> List[Dict[str, Any]]:
     """Kaneda: evasión de sandbox y llamadas al sistema en todos los .c (también los sin completar)."""
     c_files = sorted([
@@ -1175,6 +1221,11 @@ def run_ripley_analysis(
         if sec_findings:
             res_dict.setdefault("ast_findings", []).extend(sec_findings)
             res_dict.setdefault("metrics", {})["security_violations"] = len(sec_findings)
+
+    # 4b. Encapsulamiento de TDAs (motoko), en el perfil de las actividades de TDAs (Ola 17). Va aparte de
+    # ast_findings: no lo filtran las reglas de ripley ni se mezcla en su sección.
+    if getattr(checks, "motoko_enabled", False):
+        res_dict["motoko"] = _collect_motoko(target_path, uncompleted_set)
 
     # 5. Filtrar hallazgos de Ripley según reglas activas/deshabilitadas
     if "ast_findings" in res_dict:

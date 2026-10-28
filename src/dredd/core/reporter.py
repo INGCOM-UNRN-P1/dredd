@@ -374,6 +374,38 @@ def _informe_kaneda(ast_findings, generated, rni_dir) -> None:
     generated["kaneda"] = kan_path
 
 
+def _informe_motoko(analysis, generated, rni_dir) -> None:
+    """Calidad de abstracción de los TDAs (motoko, Ola 17): sólo en el perfil de las actividades de TDAs."""
+    motoko = analysis.get("motoko")
+    if not motoko:
+        return
+    lineas = ["## 🧱 Calidad de abstracción (TDAs)\n"]
+    if not motoko.get("disponible"):
+        lineas.append("> motoko no está instalado: no se auditó el encapsulamiento de los TDAs.\n")
+    elif not motoko.get("tdas"):
+        lineas.append("No se encontraron TDAs (`typedef struct …`) en los ejercicios de la entrega.\n")
+    else:
+        for frase in motoko.get("resumen") or []:
+            lineas.append(f"- {frase}")
+        hallazgos = motoko.get("findings") or []
+        errores = sum(1 for f in hallazgos if f.get("severity") == "ERROR")
+        if hallazgos:
+            lineas += ["", "| Código | Ubicación | Severidad | Qué pasa | Qué hacer |", "| :---: | :--- | :---: | :--- | :--- |"]
+            for f in hallazgos:
+                lineas.append(f"| `{f.get('rule_code')}` | `{f.get('file')}:{f.get('line')}` | **{f.get('severity')}** | "
+                              f"{str(f.get('message')).replace('|', '&#124;')} | {str(f.get('suggestion')).replace('|', '&#124;')} |")
+            lineas.append("")
+            lineas.append(f"> {'❌' if errores else '⚠️'} **Encapsulamiento:** {errores} error(es) y "
+                          f"{len(hallazgos) - errores} advertencia(s). Descuentan en el criterio de diseño de la "
+                          "rúbrica (`modularidad_y_diseño`, deckard): el código cliente usa el TDA sólo a través de "
+                          "las funciones de su `.h`.\n")
+        else:
+            lineas.append("\n> ✅ **Encapsulamiento:** el código cliente usa los TDAs sólo a través de sus funciones públicas.\n")
+    ruta = rni_dir / "motoko.md"
+    ruta.write_text("\n".join(lineas) + "\n", encoding="utf-8")
+    generated["motoko"] = ruta
+
+
 def _informe_spunkmeyer(analysis, ast_p1_findings, generated, rni_dir) -> None:
     """4. Spunkmeyer (Antipatrones Didácticos)"""
     # 4. Spunkmeyer (Antipatrones Didácticos)
@@ -592,7 +624,7 @@ def _informe_preguntas_orales(analysis, generated, rni_dir) -> None:
 
 _SECCIONES_PROPIAS = (
     "resumen.md", "binarios.md", "daedalus.md", "ripley.md", "kaneda.md", "spunkmeyer.md",
-    "tests.md", "valgrind.md", "gaff.md", "similarity.md", "oral_questions.md",
+    "tests.md", "valgrind.md", "gaff.md", "similarity.md", "oral_questions.md", "motoko.md",
 )
 
 
@@ -660,6 +692,9 @@ def write_individual_tool_reports(
 
     # 3. Auditoría de Seguridad (Sandbox / Kaneda)
     _informe_kaneda(ast_findings=ast_findings, generated=generated, rni_dir=rni_dir)
+
+    # 3b. Calidad de abstracción de los TDAs (motoko, Ola 17)
+    _informe_motoko(analysis=analysis, generated=generated, rni_dir=rni_dir)
 
     # 4. Spunkmeyer (Antipatrones Didácticos)
     _informe_spunkmeyer(analysis=analysis, ast_p1_findings=ast_p1_findings, generated=generated, rni_dir=rni_dir)

@@ -37,7 +37,8 @@ def _categoria(codigo: str, herramienta: str) -> str:
 def a_hallazgos(analysis: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Los hallazgos estáticos del análisis de ripley en la forma común (los repetidos, una vez)."""
     resultado, vistos = [], set()
-    for f in list(analysis.get("ast_findings", [])) + list(analysis.get("style_findings", [])):
+    motoko = list((analysis.get("motoko") or {}).get("findings") or [])
+    for f in list(analysis.get("ast_findings", [])) + list(analysis.get("style_findings", [])) + motoko:
         codigo = str(f.get("rule_code") or f.get("codigo") or "").strip()
         if not codigo:
             continue

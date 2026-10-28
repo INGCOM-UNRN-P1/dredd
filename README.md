@@ -136,6 +136,22 @@ dredd plagiarism tp01_1228009                    # umbral de checks.plagiarism.t
 dredd plagiarism tp01_1228009 --threshold 0.70
 ```
 
+#### Encapsulamiento de TDAs (motoko)
+En las actividades de TDAs dredd corre `motoko check --json` sobre cada ejercicio completado (o sobre la
+entrega entera si no tiene ejercicios; motoko saltea `libs/`). Se activa con el tema de la actividad en
+el mapeo (`tema: tad` o `modulos`, el vocabulario de los perfiles de ripley) o con `checks.motoko.enabled`:
+
+```yaml
+mapeos:
+- entrega: TP5
+  source: github
+  tema: tad
+```
+
+El informe suma la sección «Calidad de abstracción (TDAs)»: qué TDAs son opacos, cada acceso a un campo
+privado o struct privado copiado en el cliente, con la función pública que lo reemplaza. Sus hallazgos van a
+`hallazgos.json` (categoría `tad`) y descuentan en el criterio `modularidad_y_diseño` de la rúbrica de deckard.
+
 #### Conversión de Informes a HTML / PDF (`dredd export-report`)
 Convierte informes Markdown a HTML enriquecido autocontenido (con CSS embebido) o PDF con formato de imprenta (generación pura en Python sin dependencias externas pesadas):
 
