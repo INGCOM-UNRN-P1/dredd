@@ -322,8 +322,7 @@ src/dredd/
 | `dredd map` | Mapeo interactivo y heurístico entre archivos C de estudiantes y especificaciones de la guía. |
 | `dredd export` | Exporta calificaciones CSV, paquete ZIP de retroalimentación y dashboard consolidado de cohorte. |
 | `dredd export-report` | Convierte un informe Markdown a HTML autocontenido enriquecido o PDF (zero-dependencies). |
-| `dredd fuzz-gen` | fuzz-gen: endurece el banco generando casos límite contra la solución modelo (un `.c` o el id de un ejercicio del banco de deckard). |
-| `dredd deckard sync` | Empaqueta con `deckard export pack` los ejercicios de la guía que están en el banco (`workspace.deckard_bank_dir`). |
+| `dredd fuzz-gen` | fuzz-gen: endurece el banco generando casos límite contra la solución modelo. |
 | `dredd oral-guide` | oral-exam-companion: genera una guía de preguntas para coloquio/defensa. |
 | `dredd multiplex` | Alias docente de conveniencia que delega la generación de variantes y asignación en Deckard. |
 | `dredd doctor` | Verifica dependencias externas del sistema (GCC, Valgrind, Bubblewrap, Git, Ripley). |
@@ -350,6 +349,7 @@ src/dredd/
 | `dredd github` | Comandos de integración con GitHub (clone, comment, pr-fix). |
 | `dredd config` | Gestión de configuración, entregas, guías y políticas de chequeo. |
 | `dredd evaluate` | Evaluación docente, autograding y limpieza de entregas. |
+| `dredd deckard` | Integración con el banco de ejercicios de deckard. |
 
 Ayuda de cada comando: `dredd <comando> -h`.
 
