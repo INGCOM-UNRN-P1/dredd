@@ -329,6 +329,7 @@ src/dredd/
 | `dredd rerun` | Re-ejecuta la evaluación sobre entregas desaprobadas o con observaciones críticas. |
 | `dredd export-guarani` | Exporta las calificaciones finales en formato estándar de actas de SIU Guaraní. |
 | `dredd serve-dashboard`, `dredd dashboard` | Inicia un servidor web local para visualizar el dashboard de notas y plagio. |
+| `dredd cohorte` | Planilla de seguimiento de una cohorte de Classroom: estado, observaciones frecuentes y tiempos (Ola 25). |
 | `dredd audit-git` | Audita anomalías temporales y patrones de desarrollo en commits de Git. |
 | `dredd git-forensics` | Audita marcas de tiempo en Git para detectar alteraciones manuales o rebase masivo previo a entrega. |
 | `dredd notify-batch`, `dredd export-feedback` | Empaqueta y exporta los informes individuales alumno_rN.md en un lote consolidado con ZIP. |

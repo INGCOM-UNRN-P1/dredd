@@ -4,6 +4,12 @@ Todos los cambios notables de este proyecto se documentan en este archivo.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/);
 versiones según [SemVer](https://semver.org/lang/es/).
 
+## [Sin publicar]
+
+### Agregado
+
+- **cohorte**: `dredd cohorte <carpeta>` arma la planilla de seguimiento de una cohorte de GitHub Classroom (un repo clonado por alumno): estado de cada entrega con el veredicto de perfil de ripley, observaciones más frecuentes con enlace al apunte y tiempos (commits del alumno, último commit y atraso respecto de `--fecha-limite`), en `cohorte.csv`, `cohorte.md` y `cohorte.json`. Lo usa sulaco `cohorte.yml` (Ola 25).
+
 ## [2.1.0] - 2026-09-28
 
 Primera versión con registro de cambios; lo anterior está en el historial de git.

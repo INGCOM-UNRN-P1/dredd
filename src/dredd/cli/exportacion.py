@@ -226,3 +226,37 @@ def cmd_sanitize_output(
     max_bytes = max_mb * 1024 * 1024
     out_target = sanitize_log_file(file, output_path=output, max_bytes=max_bytes)
     console.print(f"[bold green]✓ Archivo sanitizado con éxito en:[/bold green] [cyan]{out_target}[/cyan]")
+
+
+def cmd_cohorte(
+    carpeta: Path = typer.Argument(..., exists=True, file_okay=False, help="Carpeta con un repositorio clonado por alumno."),
+    salida: Path = typer.Option(Path("informe-cohorte"), "--salida", "-o", help="Carpeta para cohorte.csv, cohorte.md y cohorte.json."),
+    ruta: str = typer.Option(".", "--ruta", help="Archivo o carpeta a verificar dentro de cada repositorio."),
+    perfil: str = typer.Option("strict", "--perfil", "-p", help="Perfil de ripley: strict, relaxed o exam."),
+    prefijo: str = typer.Option("", "--prefijo", help="Prefijo de los repos de Classroom (tp1-): el resto es el usuario del alumno."),
+    fecha_limite: Optional[str] = typer.Option(None, "--fecha-limite", help="Fecha límite ISO 8601 (2026-11-02T23:59-03:00) para calcular el atraso."),
+) -> None:
+    """Planilla de seguimiento de una cohorte de Classroom: estado, observaciones frecuentes y tiempos (Ola 25)."""
+    from datetime import datetime
+
+    from dredd.core.seguimiento import analizar_cohorte, escribir
+    from dredd.core.ecosystem import resolve_sibling_cli
+
+    ripley = resolve_sibling_cli("ripley")
+    if not ripley:
+        console.print("[bold red]No se encontró ripley:[/bold red] instalalo con mother (perfil docente).")
+        raise typer.Exit(code=2)
+    limite = None
+    if fecha_limite:
+        try:
+            limite = datetime.fromisoformat(fecha_limite)
+        except ValueError as e:
+            raise typer.BadParameter(f"fecha inválida: {fecha_limite}") from e
+        if limite.tzinfo is None:
+            raise typer.BadParameter("indicá la zona horaria (por ejemplo 2026-11-02T23:59-03:00)")
+    informe = analizar_cohorte(carpeta, ruta=ruta, perfil=perfil, prefijo=prefijo, fecha_limite=limite, ripley=ripley)
+    for ruta_salida in escribir(informe, salida):
+        console.print(f"[green]✓[/green] {ruta_salida}")
+    t = informe["totales"]
+    console.print(f"{t['alumnos']} alumnos: {t['aprobada']} aprobadas, {t['con errores']} con errores, "
+                  f"{t['no compila']} no compilan, {t['sin entrega']} sin entrega.")

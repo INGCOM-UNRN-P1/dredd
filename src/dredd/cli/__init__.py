@@ -37,6 +37,7 @@ from dredd.cli.github import (  # noqa: F401
     cmd_pr_fix,
 )
 from dredd.cli.exportacion import (  # noqa: F401
+    cmd_cohorte,
     cmd_dashboard,
     cmd_export,
     cmd_export_feedback,
@@ -92,6 +93,7 @@ moodle_app.command('export-guarani')(cmd_export_guarani)
 app.command('export-guarani')(cmd_export_guarani)
 app.command('serve-dashboard')(cmd_dashboard)
 app.command('dashboard')(cmd_dashboard)
+app.command('cohorte')(cmd_cohorte)
 app.command('audit-git')(cmd_audit_git)
 app.command('git-forensics')(cmd_git_forensics)
 app.command('notify-batch')(cmd_export_feedback)
