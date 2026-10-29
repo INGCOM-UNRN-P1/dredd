@@ -1,6 +1,7 @@
 """Integración entre Dredd y las guías / especificaciones de Deckard."""
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 import re
 from typing import Any, Dict, List, Optional
@@ -26,6 +27,14 @@ class GuideExercise:
     archivos_requeridos: List[str] = field(default_factory=list)
     enunciado: str = ""
     pistas: List[str] = field(default_factory=list)
+    # Ejercicio de funciones (Ola 32): el driver de deckard (tests/funciones/driver.c) y sus casos,
+    # que se corren con el archivo del alumno enlazado al driver, no con su propio main.
+    driver_c: str = ""
+    casos_funciones: List[Dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def tiene_casos(self) -> bool:
+        return bool(self.test_cases or (self.driver_c and self.casos_funciones))
 
     @property
     def display_name(self) -> str:
@@ -71,6 +80,44 @@ def extract_c_function_names(c_code: str) -> List[str]:
     return [m for m in matches if m not in keywords]
 
 
+# Ids de ejercicio que una práctica reusa con otro contenido (`ejercicio1` de entrega_4 son primos;
+# en el banco, `tipos_datos_abstractos/ejercicio1` es el TDA fracción): sólo con un mapeo explícito.
+ID_GENERICO = re.compile(r"^(?:ejercicio|ej|entrega)[_-]?\d+$", re.IGNORECASE)
+
+
+def id_en_banco(eid: str, mapa_banco: Optional[Dict[str, str]] = None,
+                item: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """El id del banco que corresponde al ejercicio `eid` de la guía (Ola 32): el del mapeo de la
+    actividad en dredd.yaml (`ejercicios_banco`), el `banco:` del ítem de la guía o el mismo id, salvo
+    que sea genérico (`ejercicio3`), que sin mapeo no se busca."""
+    explicito = (mapa_banco or {}).get(eid) or ((item or {}).get("banco") if isinstance(item, dict) else None)
+    if explicito:
+        return str(explicito)
+    return None if ID_GENERICO.match(eid) else eid
+
+
+def ubicar_en_banco(banco_dir: Path, eid: str) -> Optional[Path]:
+    """La carpeta del ejercicio `eid` en el banco de deckard: `<banco>/<id>/` o, en un banco
+    organizado por tema, `<banco>/<tema>/<id>/` (enunciados/banco, desde el 29/10/26)."""
+    return _indice_banco(str(banco_dir.resolve())).get(eid)
+
+
+@lru_cache(maxsize=8)
+def _indice_banco(banco: str) -> Dict[str, Path]:
+    """{id: carpeta} por el `id:` de cada ejercicio.yaml, no por el nombre de la carpeta: en el banco
+    hay carpetas genéricas (`tipos_datos_abstractos/ejercicio1`) que no son el `ejercicio1` de un TP."""
+    indice: Dict[str, Path] = {}
+    for meta in sorted(Path(banco).rglob("ejercicio.yaml")):  # rglob no sigue enlaces simbólicos
+        try:
+            datos = yaml.safe_load(meta.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        eid = datos.get("id") if isinstance(datos, dict) else None
+        if isinstance(eid, str) and eid:
+            indice.setdefault(eid, meta.parent)
+    return indice
+
+
 def _parse_ripkg_payload(ripkg_path: Path) -> Dict[str, Any]:
     """Extrae metadatos, consigna, pistas, casos de prueba y prototipos desde un paquete .ripkg."""
     import zipfile
@@ -82,6 +129,8 @@ def _parse_ripkg_payload(ripkg_path: Path) -> Dict[str, Any]:
         "starter_code": "",
         "tipo_entrega": None,
         "manifest": {},
+        "driver_c": "",
+        "casos_funciones": [],
     }
     if not ripkg_path.is_file():
         return info
@@ -109,6 +158,16 @@ def _parse_ripkg_payload(ripkg_path: Path) -> Dict[str, Any]:
                     break
             # 4. Tests .in / .out
             in_files = sorted([n for n in names if n.endswith(".in")])
+            for in_f in [n for n in in_files if "funciones" in Path(n).parts]:
+                out_f = in_f[:-3] + ".out"
+                info["casos_funciones"].append({
+                    "nombre": Path(in_f).stem,
+                    "entrada": z.read(in_f).decode("utf-8", errors="replace"),
+                    "salida": z.read(out_f).decode("utf-8", errors="replace") if out_f in names else "",
+                })
+            for d_name in [n for n in names if n.endswith("funciones/driver.c")][:1]:
+                info["driver_c"] = z.read(d_name).decode("utf-8", errors="replace")
+            in_files = [n for n in in_files if "funciones" not in Path(n).parts]
             for in_f in in_files:
                 stem = Path(in_f).stem
                 parent = Path(in_f).parent
@@ -135,7 +194,8 @@ def _parse_ripkg_payload(ripkg_path: Path) -> Dict[str, Any]:
 
 
 def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None,
-                           banco_dir: Optional[Path] = None) -> Optional[ActivityGuide]:
+                           banco_dir: Optional[Path] = None,
+                           mapa_banco: Optional[Dict[str, str]] = None) -> Optional[ActivityGuide]:
     try:
         data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
     except Exception:
@@ -195,9 +255,11 @@ def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None,
             if matching_ripkgs:
                 ripkg_file = matching_ripkgs[0]
 
-        if not ripkg_file and not ex_dir and banco_dir and (banco_dir / eid / "ejercicio.yaml").is_file():
+        id_banco = id_en_banco(eid, mapa_banco, item_data)
+        en_banco = ubicar_en_banco(banco_dir, id_banco) if (banco_dir and id_banco and not ripkg_file and not ex_dir) else None
+        if en_banco is not None:
             # Sin paquete ni carpeta en la guía: el ejercicio del banco de deckard (F-05).
-            ex_dir = banco_dir / eid
+            ex_dir = en_banco
             ej_yaml = ex_dir / "ejercicio.yaml"
 
         ripkg_info = _parse_ripkg_payload(ripkg_file) if ripkg_file else {}
@@ -238,6 +300,15 @@ def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None,
                         "entrada": f_in.read_text(encoding="utf-8", errors="replace"),
                         "salida": f_out.read_text(encoding="utf-8", errors="replace") if f_out.is_file() else "",
                     })
+            casos_dir = tests_dir / "funciones"
+            if (casos_dir / "driver.c").is_file() and not ripkg_info.get("casos_funciones"):
+                ripkg_info["driver_c"] = (casos_dir / "driver.c").read_text(encoding="utf-8", errors="replace")
+                ripkg_info["casos_funciones"] = [
+                    {"nombre": f.stem, "entrada": f.read_text(encoding="utf-8", errors="replace"),
+                     "salida": f.with_suffix(".out").read_text(encoding="utf-8", errors="replace")
+                     if f.with_suffix(".out").is_file() else ""}
+                    for f in sorted(casos_dir.glob("*.in"))
+                ]
             if not ex_enunciado:
                 for cand_en in [ex_dir / "enunciado.md", ex_dir / "consigna.md"]:
                     if cand_en.is_file():
@@ -265,6 +336,8 @@ def _parse_guide_yaml_file(yaml_path: Path, guide_dir: Optional[Path] = None,
                 archivos_requeridos=archivos_req if isinstance(archivos_req, list) else ([archivos_req] if archivos_req else []),
                 enunciado=ex_enunciado,
                 pistas=ex_pistas,
+                driver_c=ripkg_info.get("driver_c", ""),
+                casos_funciones=ripkg_info.get("casos_funciones", []),
             )
         )
 
@@ -376,7 +449,8 @@ def _parse_guide_from_exercise_dirs(guide_dir: Path, exercise_dirs: List[Path]) 
     )
 
 
-def load_guide_from_deckard_dir(deckard_dir: Path, banco_dir: Optional[Path] = None) -> Optional[ActivityGuide]:
+def load_guide_from_deckard_dir(deckard_dir: Path, banco_dir: Optional[Path] = None,
+                                mapa_banco: Optional[Dict[str, str]] = None) -> Optional[ActivityGuide]:
     """Carga una guía y sus enunciados desde un directorio .deckard (máxima prioridad)."""
     if not deckard_dir.is_dir():
         return None
@@ -385,7 +459,7 @@ def load_guide_from_deckard_dir(deckard_dir: Path, banco_dir: Optional[Path] = N
     for gy_name in ("guia.yaml", "guia.yml"):
         gy = deckard_dir / gy_name
         if gy.is_file():
-            guide = _parse_guide_yaml_file(gy, guide_dir=deckard_dir, banco_dir=banco_dir)
+            guide = _parse_guide_yaml_file(gy, guide_dir=deckard_dir, banco_dir=banco_dir, mapa_banco=mapa_banco)
             if guide:
                 guide.enunciado_source = f".deckard ({deckard_dir})"
                 return guide
@@ -479,6 +553,8 @@ def load_activity_guide(
     from dredd.core.config import load_dredd_config
     cfg = load_dredd_config(ws) or load_dredd_config(sub_dir)
     banco = cfg.banco_deckard() if cfg else None
+    regla = cfg.find_mapping_for_activity(clean_slug) if cfg else None
+    mapa = regla.ejercicios_banco if regla else None
 
     # =========================================================================
     # 1. PRIORIDAD MÁXIMA: Buscar en directorio '.deckard'
@@ -503,7 +579,7 @@ def load_activity_guide(
 
     for cand_deck in deckard_candidates:
         if cand_deck.is_dir():
-            g = load_guide_from_deckard_dir(cand_deck, banco_dir=banco)
+            g = load_guide_from_deckard_dir(cand_deck, banco_dir=banco, mapa_banco=mapa)
             if g:
                 g.enunciado_source = f".deckard ({cand_deck})"
                 return g
@@ -516,7 +592,7 @@ def load_activity_guide(
         cfg_guide_path = cfg.get_guide_path(clean_slug, ws)
         if cfg_guide_path:
             if cfg_guide_path.is_file() and cfg_guide_path.suffix in (".yaml", ".yml"):
-                g = _parse_guide_yaml_file(cfg_guide_path, banco_dir=banco)
+                g = _parse_guide_yaml_file(cfg_guide_path, banco_dir=banco, mapa_banco=mapa)
                 if g:
                     g.enunciado_source = f"configuración general (dredd.yaml: {cfg_guide_path})"
                     return g
@@ -524,13 +600,13 @@ def load_activity_guide(
                 # Si el directorio configurado en dredd.yaml tiene .deckard, usarlo
                 for deck_sub in [cfg_guide_path / ".deckard", cfg_guide_path / clean_slug / ".deckard"]:
                     if deck_sub.is_dir():
-                        g = load_guide_from_deckard_dir(deck_sub, banco_dir=banco)
+                        g = load_guide_from_deckard_dir(deck_sub, banco_dir=banco, mapa_banco=mapa)
                         if g:
                             g.enunciado_source = f"configuración general (.deckard en {deck_sub})"
                             return g
                 gy = cfg_guide_path / "guia.yaml" if (cfg_guide_path / "guia.yaml").is_file() else cfg_guide_path / "guia.yml"
                 if gy.is_file():
-                    g = _parse_guide_yaml_file(gy, guide_dir=cfg_guide_path, banco_dir=banco)
+                    g = _parse_guide_yaml_file(gy, guide_dir=cfg_guide_path, banco_dir=banco, mapa_banco=mapa)
                     if g:
                         g.enunciado_source = f"configuración general ({cfg_guide_path})"
                         return g
@@ -567,7 +643,7 @@ def load_activity_guide(
 
     for cand in general_locations:
         if cand.is_file() and cand.suffix in (".yaml", ".yml"):
-            g = _parse_guide_yaml_file(cand, banco_dir=banco)
+            g = _parse_guide_yaml_file(cand, banco_dir=banco, mapa_banco=mapa)
             if g:
                 g.enunciado_source = f"configuración general ({cand})"
                 return g
@@ -575,14 +651,14 @@ def load_activity_guide(
             # Si el directorio de la práctica tiene .deckard (directo o anidado)
             for cand_deck in [cand / ".deckard", cand / clean_slug / ".deckard"]:
                 if cand_deck.is_dir():
-                    g = load_guide_from_deckard_dir(cand_deck, banco_dir=banco)
+                    g = load_guide_from_deckard_dir(cand_deck, banco_dir=banco, mapa_banco=mapa)
                     if g:
                         g.enunciado_source = f"configuración general ({cand_deck})"
                         return g
             try:
                 for sub in cand.iterdir():
                     if sub.is_dir() and (sub / ".deckard").is_dir():
-                        g = load_guide_from_deckard_dir(sub / ".deckard", banco_dir=banco)
+                        g = load_guide_from_deckard_dir(sub / ".deckard", banco_dir=banco, mapa_banco=mapa)
                         if g:
                             g.enunciado_source = f"configuración general ({sub / '.deckard'})"
                             return g
@@ -591,7 +667,7 @@ def load_activity_guide(
 
             guide_yaml = cand / "guia.yaml" if (cand / "guia.yaml").is_file() else cand / "guia.yml"
             if guide_yaml.is_file():
-                g = _parse_guide_yaml_file(guide_yaml, guide_dir=cand, banco_dir=banco)
+                g = _parse_guide_yaml_file(guide_yaml, guide_dir=cand, banco_dir=banco, mapa_banco=mapa)
                 if g:
                     g.enunciado_source = f"configuración general ({cand})"
                     return g

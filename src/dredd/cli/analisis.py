@@ -132,6 +132,7 @@ def cmd_deckard_sync(
     import yaml
 
     from dredd.core.config import load_dredd_config
+    from dredd.core.guide_integration import id_en_banco, ubicar_en_banco
 
     ws = Path.cwd()
     cfg = load_dredd_config(ws)
@@ -165,16 +166,19 @@ def cmd_deckard_sync(
     existentes: List[str] = []
     fuera_del_banco: List[str] = []
     fallidos: List[str] = []
+    regla = cfg.find_mapping_for_activity(actividad)
+    mapa = regla.ejercicios_banco if regla else {}
     for eid in [str(i) for i in ids if i]:
         destino = guia.parent / f"{eid}.ripkg"
-        if not (banco / eid / "ejercicio.yaml").is_file():
+        id_banco = id_en_banco(eid, mapa)
+        if id_banco is None or ubicar_en_banco(banco, id_banco) is None:
             fuera_del_banco.append(eid)
         elif destino.is_file() and not forzar:
             existentes.append(eid)
         elif dry_run:
             empaquetados.append(eid)
         else:
-            proc = subprocess.run([str(deckard), "export", "pack", eid, "--banco", str(banco), "--salida", str(destino)],
+            proc = subprocess.run([str(deckard), "export", "pack", id_banco, "--banco", str(banco), "--salida", str(destino)],
                                   capture_output=True, text=True)
             (empaquetados if proc.returncode == 0 and destino.is_file() else fallidos).append(eid)
             if proc.returncode != 0:

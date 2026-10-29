@@ -81,6 +81,23 @@ completa los ejercicios de la guía que no tienen `.ripkg` desde el banco de dec
 (`workspace.deckard_bank_dir`: `<banco>/<id>/ejercicio.yaml`, `solucion.c`, `tests/`).
 `dredd config validate` lista los ejercicios que quedan sin casos de prueba de la cátedra.
 
+El banco puede estar organizado por tema (`<banco>/<tema>/<id>/`): el ejercicio se busca por el
+`id:` de su `ejercicio.yaml`. Un id genérico de una práctica (`ejercicio3`, `entrega_2`) no se busca
+en el banco —ahí puede ser otro ejercicio—: se mapea en la regla de la actividad, o con `banco:` en
+el ítem de la guía:
+
+```yaml
+- entrega: entrega_4
+  guia: guias/entrega_4/guia.yaml
+  ejercicios_banco:
+    ejercicio1: ej-5-4-numeros-primos
+```
+
+Los ejercicios de funciones traen sus casos en `tests/funciones/` (los genera `deckard exercise
+cubrir`): el archivo del alumno, con su `main` renombrado, se compila con el `driver.c` del
+ejercicio, que llama a las funciones del enunciado con cada entrada. Así el `main` de cada alumno
+no influye en el resultado; si falta una función o cambió su prototipo, el caso lo dice.
+
 #### Targets del docente (`dredd.mk`)
 
 Una práctica creada con `deckard guide practica` trae, del lado del docente, una carpeta

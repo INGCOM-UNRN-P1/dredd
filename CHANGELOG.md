@@ -8,6 +8,8 @@ versiones según [SemVer](https://semver.org/lang/es/).
 
 ### Agregado
 
+- **banco**: búsqueda en un banco organizado por tema (por el `id:` del ejercicio); `ejercicios_banco` en la regla de la actividad (y `banco:` en el ítem de la guía) para mapear ids de la práctica a los del banco; los ids genéricos (`ejercicioN`, `entrega_N`) sólo se resuelven así; `deckard sync` empaqueta con el id mapeado (Ola 32).
+- **funciones**: casos de `tests/funciones/` (banco o `.ripkg`) que se corren compilando el archivo del alumno, con su `main` renombrado, junto al driver del ejercicio; cuentan como casos en `config validate` (Ola 32).
 - **targets del docente**: `targets_docente` en la regla de la actividad (la carpeta de `deckard guide practica`): la evaluación copia `dredd.mk` y `.dredd/` en la entrega, corre cada `make dredd-…` en los ejercicios declarados, los suma al informe (sólo los visibles para el alumno) y a la nota de pruebas según su peso, y descarta e informa un `dredd.mk` o un target `dredd-…` propio de la entrega; `config validate` los verifica (Ola 30).
 - **makefiles individuales**: dentro de `ejercicios/` vale cualquier nombre de carpeta (los ids del banco de las prácticas generadas), no sólo `ejercicioN` (Ola 30).
 - **cohorte**: `dredd cohorte <carpeta>` arma la planilla de seguimiento de una cohorte de GitHub Classroom (un repo clonado por alumno): estado de cada entrega con el veredicto de perfil de ripley, observaciones más frecuentes con enlace al apunte y tiempos (commits del alumno, último commit y atraso respecto de `--fecha-limite`), en `cohorte.csv`, `cohorte.md` y `cohorte.json`. Lo usa sulaco `cohorte.yml` (Ola 25).

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -463,6 +464,8 @@ def evaluate_guide_testcases(
 
         # 3. Modo estándar: archivos individuales
         for ex in guide.exercises:
+            if ex.driver_c and ex.casos_funciones:
+                results.extend(_casos_con_driver(ex, c_files, tmp_dir, target_path))
             if not ex.test_cases:
                 continue
 
@@ -506,6 +509,44 @@ def evaluate_guide_testcases(
                 results.append(case_res)
 
     return results
+
+
+MAIN_DEL_ALUMNO = "dredd_main_del_alumno"
+
+
+def _casos_con_driver(ex: Any, c_files: List[Path], tmp_dir: Path, workspace: Path) -> List[Dict[str, Any]]:
+    """Casos de un ejercicio de funciones (Ola 32): el archivo del alumno, con su main renombrado, se
+    enlaza con el driver de deckard, que llama a las funciones del enunciado con cada entrada."""
+    driver = tmp_dir / f"driver_{ex.id}.c"
+    driver.write_text(ex.driver_c, encoding="utf-8")
+    coincidentes = [f for f in c_files if ex.id.lower() in f.stem.lower() or f.stem.lower() in ex.id.lower()]
+    binario, ultimo_error = None, ""
+    for c_cand in coincidentes or c_files:
+        copia = tmp_dir / f"alumno_{ex.id}_{c_cand.stem}.c"
+        texto = c_cand.read_text(encoding="utf-8", errors="replace")
+        copia.write_text('#pragma GCC diagnostic ignored "-Wmissing-prototypes"\n'
+                         + re.sub(r"\bmain\s*\(", f"{MAIN_DEL_ALUMNO}(", texto), encoding="utf-8")
+        destino = tmp_dir / f"driver_{ex.id}_{c_cand.stem}"
+        comp = compile_c_sources([copia, driver], output_bin=destino)
+        if comp.success and destino.is_file():
+            binario = destino
+            break
+        ultimo_error = comp.raw_stderr[:300]
+    resultados = []
+    for tc in ex.casos_funciones:
+        nombre = f"{ex.id} / funciones / {tc['nombre']}"
+        if binario is None:
+            resultados.append({
+                "name": nombre, "passed": False, "memory_leak": False,
+                "input_data": tc.get("entrada", ""), "expected_output": tc.get("salida", ""), "actual_output": "",
+                "sanitizer_error": "No se pudo compilar con el driver de las funciones del enunciado "
+                                   f"(¿falta una función o cambió su prototipo?): {ultimo_error}",
+            })
+            continue
+        resultados.append(_run_single_case_in_sandbox(
+            bin_file=binario, tc_name=nombre, input_data=tc.get("entrada", ""),
+            expected_output=tc.get("salida", ""), workspace=workspace))
+    return resultados
 
 
 def discover_and_run_local_testcases(target_path: Path) -> List[Dict[str, Any]]:

@@ -324,6 +324,9 @@ class MappingRule:
     # Carpeta que genera `deckard guide practica` para el docente (dredd.mk, .dredd/, targets.json),
     # relativa a dredd.yaml: los targets dredd-… que se corren en cada entrega (Ola 30).
     targets_docente: Optional[str] = None
+    # {id en la guía: id en el banco de deckard} para las prácticas cuyos ids no son los del banco
+    # (`ejercicio1` de entrega_4 → `ej-…-primos`). Los ids genéricos sólo se buscan así (Ola 32).
+    ejercicios_banco: Dict[str, str] = field(default_factory=dict)
 
     def matches_zip(self, zip_filename: str) -> bool:
         """Verifica si el nombre de archivo ZIP coincide con el patrón configurado."""
@@ -638,6 +641,7 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
                                     repo_pattern=m.get("repo_pattern"),
                                     branch=m.get("branch"),
                                     targets_docente=m.get("targets_docente"),
+                                    ejercicios_banco={str(k): str(v) for k, v in (m.get("ejercicios_banco") or {}).items()},
                                 )
                             )
                     return DreddConfig(
@@ -761,7 +765,7 @@ def _ejercicios_sin_fuente(entrega: str, ws: Path) -> List[Tuple[str, str, str]]
     guia = load_activity_guide(ws, entrega, ws)
     if guia is None or not guia.exercises:
         return []
-    sin_casos = [e.id for e in guia.exercises if not e.test_cases]
+    sin_casos = [e.id for e in guia.exercises if not e.tiene_casos]
     if not sin_casos:
         return []
     return [("WARN", f"casos:{entrega}",
