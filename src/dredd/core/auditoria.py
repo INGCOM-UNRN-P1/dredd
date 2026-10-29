@@ -57,10 +57,15 @@ def resultado_del_analisis(analysis: Dict[str, Any]) -> Dict[str, Any]:
     tests = analysis.get("tests") or {}
     casos = [{"nombre": str(c.get("name") or ""), "aprobado": bool(c.get("passed")),
               "fuga_memoria": bool(c.get("memory_leak"))} for c in tests.get("cases") or []]
-    return {
+    resultado: Dict[str, Any] = {
         "compilacion": bool((analysis.get("compilation") or {}).get("success")),
         "tests": {"aprobados": int(tests.get("passed") or 0), "total": int(tests.get("total") or 0), "casos": casos},
     }
+    targets = analysis.get("targets_docente")
+    if targets:  # Ola 30: los pesos de los targets del docente entran en la nota de pruebas
+        resultado["targets_docente"] = {"puntaje": targets.get("puntaje"), "peso_total": targets.get("peso_total"),
+                                        "alertas": len(targets.get("alertas") or [])}
+    return resultado
 
 
 def registrar(directorio: Path, alumno: str, actividad: str, revision: str,

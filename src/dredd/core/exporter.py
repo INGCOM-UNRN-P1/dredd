@@ -110,6 +110,9 @@ class MoodleExporter:
                         tests = resultado.get("tests") or {}
                         if int(tests.get("total") or 0) > 0:
                             grade_tests = 10.0 * int(tests.get("aprobados") or 0) / int(tests["total"])
+                        # Los targets del docente pesan un porcentaje de la nota de pruebas (Ola 30).
+                        from dredd.core.targets_docente import aplicar_a_nota
+                        grade_tests = aplicar_a_nota(grade_tests, resultado.get("targets_docente"))
                     else:
                         compilation_status = "INCOMPLETA"
                 else:

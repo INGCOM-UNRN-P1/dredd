@@ -31,10 +31,12 @@ def evaluate_makefile_exercises(
         except Exception:
             uncompleted_exercises = set()
 
+    # Dentro de ejercicios/ vale cualquier nombre: las prácticas generadas desde una guía de deckard
+    # usan el id del banco (`suma-dos`, `ej-5-3-paridad`), no `ejercicioN` (Ola 30).
     candidates = (
         list(repo_path.glob("ejercicio*"))
-        + list(repo_path.glob("ejercicios/ejercicio*"))
-        + list(repo_path.glob("**/ejercicios/ejercicio*"))
+        + list(repo_path.glob("ejercicios/*"))
+        + list(repo_path.glob("**/ejercicios/*"))
     )
     exercise_dirs = sorted(
         {

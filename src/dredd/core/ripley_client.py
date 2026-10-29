@@ -577,8 +577,9 @@ def _resolve_checks_and_mode(
     workspace_dir: Optional[Path],
     checks_override: Optional[Any],
     tipo_entrega: Optional[str],
-) -> Tuple[Any, str]:
-    """Las verificaciones activas y el modo de entrega (normalizado) según dredd.toml y la guía."""
+) -> Tuple[Any, str, Optional[Path]]:
+    """Las verificaciones activas, el modo de entrega (normalizado) y la carpeta de targets del docente
+    (dredd.mk de deckard, Ola 30) según dredd.yaml y la guía."""
     from dredd.core.config import DreddConfig, load_dredd_config, normalize_delivery_mode
 
     cfg = load_dredd_config(workspace_dir or target_path) or load_dredd_config(target_path) or DreddConfig()
@@ -593,7 +594,9 @@ def _resolve_checks_and_mode(
         target_path=target_path,
         cli_override=tipo_entrega,
     )
-    return checks, normalize_delivery_mode(raw_mode)
+    targets = getattr(cfg, "get_targets_dir", None)
+    dir_targets = targets(activity_slug) if (activity_slug and callable(targets)) else None
+    return checks, normalize_delivery_mode(raw_mode), dir_targets
 
 
 def _collect_binary_findings(target_path: Path) -> List[Dict[str, Any]]:
@@ -1185,7 +1188,7 @@ def run_ripley_analysis(
 
     if guide is None:
         guide = _load_guide(target_path, activity_slug, workspace_dir)
-    checks, effective_mode = _resolve_checks_and_mode(
+    checks, effective_mode, dir_targets = _resolve_checks_and_mode(
         target_path, guide, activity_slug, workspace_dir, checks_override, tipo_entrega
     )
 
@@ -1226,6 +1229,11 @@ def run_ripley_analysis(
     # ast_findings: no lo filtran las reglas de ripley ni se mezcla en su sección.
     if getattr(checks, "motoko_enabled", False):
         res_dict["motoko"] = _collect_motoko(target_path, uncompleted_set)
+
+    # 4c. Targets del docente (dredd.mk de deckard), si la actividad los declara (Ola 30)
+    if dir_targets is not None:
+        from dredd.core.targets_docente import correr as correr_targets
+        res_dict["targets_docente"] = correr_targets(target_path, dir_targets).to_dict()
 
     # 5. Filtrar hallazgos de Ripley según reglas activas/deshabilitadas
     if "ast_findings" in res_dict:

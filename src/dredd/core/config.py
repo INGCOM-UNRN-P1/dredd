@@ -321,6 +321,9 @@ class MappingRule:
     github_org: Optional[str] = None
     repo_pattern: Optional[str] = None
     branch: Optional[str] = None
+    # Carpeta que genera `deckard guide practica` para el docente (dredd.mk, .dredd/, targets.json),
+    # relativa a dredd.yaml: los targets dredd-… que se corren en cada entrega (Ola 30).
+    targets_docente: Optional[str] = None
 
     def matches_zip(self, zip_filename: str) -> bool:
         """Verifica si el nombre de archivo ZIP coincide con el patrón configurado."""
@@ -446,6 +449,15 @@ class DreddConfig:
             if rule.matches_activity(activity_slug):
                 return rule
         return None
+
+    def get_targets_dir(self, activity_slug: str) -> Optional[Path]:
+        """La carpeta de targets del docente de la actividad (relativa a dredd.yaml), si la declara."""
+        rule = self.find_mapping_for_activity(activity_slug)
+        if not rule or not rule.targets_docente:
+            return None
+        ruta = Path(rule.targets_docente).expanduser()
+        base = self.config_path.parent if self.config_path else Path.cwd()
+        return ruta if ruta.is_absolute() else base / ruta
 
     def get_guide_path(self, activity_slug: str, base_dir: Optional[Path] = None) -> Optional[Path]:
         """Retorna la ruta resuelta hacia la guía de Deckard o práctica mapeada."""
@@ -625,6 +637,7 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
                                     github_org=m.get("github_org"),
                                     repo_pattern=m.get("repo_pattern"),
                                     branch=m.get("branch"),
+                                    targets_docente=m.get("targets_docente"),
                                 )
                             )
                     return DreddConfig(
@@ -800,5 +813,15 @@ def validate_workspace(workspace_dir: Optional[Path | str] = None) -> List[Tuple
                 else:
                     issues.append(("OK", f"guia:{m.entrega}", f"Guía vinculada para '{m.entrega}': {m.guia}"))
                     issues.extend(_ejercicios_sin_fuente(m.entrega, ws))
+            if m.targets_docente:
+                # Ola 30: la carpeta que genera `deckard guide practica` para la corrección.
+                from dredd.core.targets_docente import cargar, verificar
+                dir_t = cfg.get_targets_dir(m.entrega)
+                problemas = verificar(dir_t) if dir_t is not None else ["sin carpeta"]
+                if problemas or dir_t is None:
+                    issues.extend(("ERROR", f"targets:{m.entrega}", p) for p in problemas)
+                else:
+                    cantidad = len(cargar(dir_t).get("targets", []))
+                    issues.append(("OK", f"targets:{m.entrega}", f"{cantidad} targets del docente en {dir_t}"))
 
     return issues

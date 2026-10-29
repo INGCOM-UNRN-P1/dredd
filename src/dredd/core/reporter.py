@@ -1037,6 +1037,16 @@ def generate_student_report(
     # 2. Escribir informes individuales de cada herramienta en rNi/
     write_individual_tool_reports(rni_dir, analysis, metadata=metadata, guide=guide)
 
+    # 2a. Targets del docente (Ola 30): en el informe, sólo los visibles para el alumno; el detalle
+    # completo (todos, con su salida) queda en targets_docente.json para el docente.
+    if analysis.get("targets_docente"):
+        import json as _json
+        from dredd.core.targets_docente import seccion_markdown
+        (rni_dir / "targets_docente.md").write_text(
+            seccion_markdown(analysis["targets_docente"], para_alumno=True), encoding="utf-8")
+        (rni_dir / "targets_docente.json").write_text(
+            _json.dumps(analysis["targets_docente"], indent=2, ensure_ascii=False), encoding="utf-8")
+
     # 2b. Hallazgos en la taxonomía común, «Para repasar» con enlaces al apunte y registro de
     # auditoría (con qué versión de cada herramienta se corrigió, para reclamos). El registro es
     # también el cursor de las corridas masivas: queda `en_curso` hasta que el informe se escribe.

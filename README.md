@@ -81,6 +81,26 @@ completa los ejercicios de la guía que no tienen `.ripkg` desde el banco de dec
 (`workspace.deckard_bank_dir`: `<banco>/<id>/ejercicio.yaml`, `solucion.c`, `tests/`).
 `dredd config validate` lista los ejercicios que quedan sin casos de prueba de la cátedra.
 
+#### Targets del docente (`dredd.mk`)
+
+Una práctica creada con `deckard guide practica` trae, del lado del docente, una carpeta
+`<práctica>-dredd/` con `dredd.mk`, las pruebas ocultas y `targets.json`. Con
+`targets_docente: <esa carpeta>` en la regla de la actividad de `dredd.yaml`, la evaluación
+copia `dredd.mk` y `.dredd/` en la entrega (los Makefiles de plantilla-TP los incluyen), compila
+las librerías y corre cada `make dredd-…` en los ejercicios que declara; después los quita. En
+el informe del alumno aparecen sólo los targets marcados como visibles (el detalle completo
+queda en `rNi/targets_docente.json`), y sus pesos son porcentajes de la nota de pruebas en
+`dredd export`. Si la entrega trae su propio `dredd.mk` o define un target `dredd-…` en un
+Makefile o `local.mk`, se descarta y se informa. `dredd config validate` controla que cada
+target de `targets.json` esté en el `dredd.mk`.
+
+```yaml
+mapeos:
+- entrega: tp3
+  source: github
+  targets_docente: ../deckard/practicas/tp3-dredd
+```
+
 #### Publicación de Feedback en GitHub (`dredd comment`)
 Envía automáticamente el informe `${estudiante}.md` como comentario en el Pull Request abierto del estudiante utilizando GitHub CLI (`gh`):
 
