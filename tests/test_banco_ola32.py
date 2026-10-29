@@ -85,3 +85,20 @@ def test_casos_de_funciones_con_el_main_del_alumno(tmp_path):
     casos = [c for c in evaluate_guide_testcases(entrega, guia, "archivos_individuales") if "funciones" in c["name"]]
     assert casos and not any(c["passed"] for c in casos)
     assert "driver de las funciones" in casos[0]["sanitizer_error"]
+
+
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="requiere gcc")
+def test_casos_de_funciones_en_makefiles_individuales(tmp_path):
+    """entrega_4: cada ejercicio en su carpeta con Makefile, .h propio, main.c y prueba.c."""
+    ws = _ws(tmp_path, "  ejercicios_banco:\n    ejercicio1: ej-doble\n")
+    guia = load_activity_guide(ws, "e", ws)
+    carpeta = tmp_path / "entrega" / "r1" / "ejercicios" / "ejercicio1"
+    carpeta.mkdir(parents=True)
+    (carpeta / "ejercicio1.h").write_text("#ifndef E1_H\n#define E1_H\nint doble(int n);\n#endif\n", encoding="utf-8")
+    (carpeta / "ejercicio1.c").write_text('#include "ejercicio1.h"\nint doble(int n) { return 2 * n; }\n', encoding="utf-8")
+    (carpeta / "main.c").write_text('#include <stdio.h>\n#include "ejercicio1.h"\nint main(void) { return doble(1) - 2; }\n',
+                                    encoding="utf-8")
+    (carpeta / "prueba.c").write_text("int main(void) { return 1; }\n", encoding="utf-8")  # no entra
+    casos = evaluate_guide_testcases(tmp_path / "entrega", guia, "makefiles_individuales")
+    assert [c["name"].split(" / ")[0] for c in casos] == ["ejercicio1"] * 3
+    assert all(c["passed"] for c in casos)

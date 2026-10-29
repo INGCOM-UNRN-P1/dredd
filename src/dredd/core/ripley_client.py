@@ -399,7 +399,23 @@ def evaluate_guide_testcases(
         tipo_entrega or getattr(guide, "tipo_entrega", None)
     )
     if mode == MODE_MAKEFILES_INDIVIDUALES:
-        return []
+        # `make test` de cada ejercicio corre aparte (makefile_eval); acá sólo los casos de funciones con
+        # driver: las fuentes de la carpeta del ejercicio, sin sus pruebas (Ola 32).
+        import tempfile as _tf
+        resultados: List[Dict[str, Any]] = []
+        with _tf.TemporaryDirectory() as tmp_m:
+            for ex in guide.exercises:
+                if not (ex.driver_c and ex.casos_funciones):
+                    continue
+                carpetas = [d for d in (list(target_path.glob(f"**/ejercicios/{ex.id}")) + list(target_path.glob(ex.id)))
+                            if d.is_dir() and not any(part.startswith(".") for part in d.parts)]
+                if not carpetas:
+                    continue
+                fuentes = [f for f in sorted(carpetas[0].glob("*.c"))
+                           if not f.stem.lower().startswith(("prueba", "test"))]
+                resultados.extend(_casos_con_driver(ex, fuentes, Path(tmp_m), target_path,
+                                                    juntas=True, incluir=carpetas[0]))
+        return resultados
 
     results = []
     import tempfile
@@ -514,20 +530,29 @@ def evaluate_guide_testcases(
 MAIN_DEL_ALUMNO = "dredd_main_del_alumno"
 
 
-def _casos_con_driver(ex: Any, c_files: List[Path], tmp_dir: Path, workspace: Path) -> List[Dict[str, Any]]:
-    """Casos de un ejercicio de funciones (Ola 32): el archivo del alumno, con su main renombrado, se
-    enlaza con el driver de deckard, que llama a las funciones del enunciado con cada entrada."""
+def _sin_main(origen: Path, destino: Path) -> Path:
+    texto = origen.read_text(encoding="utf-8", errors="replace")
+    destino.write_text('#pragma GCC diagnostic ignored "-Wmissing-prototypes"\n'
+                       + re.sub(r"\bmain\s*\(", f"{MAIN_DEL_ALUMNO}(", texto), encoding="utf-8")
+    return destino
+
+
+def _casos_con_driver(ex: Any, c_files: List[Path], tmp_dir: Path, workspace: Path,
+                      juntas: bool = False, incluir: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Casos de un ejercicio de funciones (Ola 32): el código del alumno, con su main renombrado, se
+    enlaza con el driver de deckard, que llama a las funciones del enunciado con cada entrada. Con
+    `juntas`, todas las fuentes (la carpeta de un ejercicio con Makefile); si no, el primer archivo
+    que enlace (archivos individuales)."""
     driver = tmp_dir / f"driver_{ex.id}.c"
     driver.write_text(ex.driver_c, encoding="utf-8")
     coincidentes = [f for f in c_files if ex.id.lower() in f.stem.lower() or f.stem.lower() in ex.id.lower()]
+    grupos = [c_files] if juntas else [[f] for f in (coincidentes or c_files)]
+    extra = [f"-I{incluir}"] if incluir else None
     binario, ultimo_error = None, ""
-    for c_cand in coincidentes or c_files:
-        copia = tmp_dir / f"alumno_{ex.id}_{c_cand.stem}.c"
-        texto = c_cand.read_text(encoding="utf-8", errors="replace")
-        copia.write_text('#pragma GCC diagnostic ignored "-Wmissing-prototypes"\n'
-                         + re.sub(r"\bmain\s*\(", f"{MAIN_DEL_ALUMNO}(", texto), encoding="utf-8")
-        destino = tmp_dir / f"driver_{ex.id}_{c_cand.stem}"
-        comp = compile_c_sources([copia, driver], output_bin=destino)
+    for i, grupo in enumerate(grupos):
+        copias = [_sin_main(f, tmp_dir / f"alumno_{ex.id}_{i}_{f.stem}.c") for f in grupo]
+        destino = tmp_dir / f"driver_{ex.id}_{i}"
+        comp = compile_c_sources([*copias, driver], output_bin=destino, extra_flags=extra)
         if comp.success and destino.is_file():
             binario = destino
             break
