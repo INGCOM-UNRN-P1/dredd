@@ -98,6 +98,10 @@ cubrir`): el archivo del alumno, con su `main` renombrado, se compila con el `dr
 ejercicio, que llama a las funciones del enunciado con cada entrada. Así el `main` de cada alumno
 no influye en el resultado; si falta una función o cambió su prototipo, el caso lo dice.
 
+Una actividad que se corrige sin casos de la cátedra a propósito (una cohorte que resolvió otra
+versión de la consigna) lleva `casos_catedra: false` en su regla: `config validate` lo informa y
+deja de avisar.
+
 #### Targets del docente (`dredd.mk`)
 
 Una práctica creada con `deckard guide practica` trae, del lado del docente, una carpeta

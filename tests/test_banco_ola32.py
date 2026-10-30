@@ -102,3 +102,13 @@ def test_casos_de_funciones_en_makefiles_individuales(tmp_path):
     casos = evaluate_guide_testcases(tmp_path / "entrega", guia, "makefiles_individuales")
     assert [c["name"].split(" / ")[0] for c in casos] == ["ejercicio1"] * 3
     assert all(c["passed"] for c in casos)
+
+
+def test_casos_catedra_false_no_avisa(tmp_path):
+    from dredd.core.config import validate_workspace
+
+    ws = _ws(tmp_path, "  casos_catedra: false\n")
+    casos = [i for i in validate_workspace(ws) if i[1] == "casos:e"]
+    assert casos and casos[0][0] == "OK" and "por decisión" in casos[0][2]
+    avisa = [i for i in validate_workspace(_ws(tmp_path / "b")) if i[1] == "casos:e"]
+    assert avisa[0][0] == "WARN"

@@ -327,6 +327,9 @@ class MappingRule:
     # {id en la guía: id en el banco de deckard} para las prácticas cuyos ids no son los del banco
     # (`ejercicio1` de entrega_4 → `ej-…-primos`). Los ids genéricos sólo se buscan así (Ola 32).
     ejercicios_banco: Dict[str, str] = field(default_factory=dict)
+    # False: la actividad se corrige sin casos de la cátedra a propósito (p. ej. una cohorte que
+    # resolvió otra versión de la consigna); config validate lo informa sin avisar.
+    casos_catedra: bool = True
 
     def matches_zip(self, zip_filename: str) -> bool:
         """Verifica si el nombre de archivo ZIP coincide con el patrón configurado."""
@@ -642,6 +645,7 @@ def load_dredd_config(workspace_dir: Optional[Path | str] = None) -> Optional[Dr
                                     branch=m.get("branch"),
                                     targets_docente=m.get("targets_docente"),
                                     ejercicios_banco={str(k): str(v) for k, v in (m.get("ejercicios_banco") or {}).items()},
+                                    casos_catedra=m.get("casos_catedra", True) is not False,
                                 )
                             )
                     return DreddConfig(
@@ -768,6 +772,12 @@ def _ejercicios_sin_fuente(entrega: str, ws: Path) -> List[Tuple[str, str, str]]
     sin_casos = [e.id for e in guia.exercises if not e.tiene_casos]
     if not sin_casos:
         return []
+    cfg = load_dredd_config(ws)
+    regla = cfg.find_mapping_for_activity(entrega) if cfg else None
+    if regla is not None and not regla.casos_catedra:
+        return [("OK", f"casos:{entrega}",
+                 f"Sin casos de la cátedra por decisión (casos_catedra: false): {len(sin_casos)} ejercicio(s) "
+                 "se evalúan con sus propias pruebas y make test.")]
     return [("WARN", f"casos:{entrega}",
              f"{len(sin_casos)} de {len(guia.exercises)} ejercicio(s) sin casos de prueba de la cátedra: "
              f"{', '.join(sin_casos)}. Empaquetalos con `dredd deckard sync {entrega}` o sumalos al banco.")]
