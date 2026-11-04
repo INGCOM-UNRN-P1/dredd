@@ -94,12 +94,20 @@ def _entregas(curso: Path):
     return {a: fuentes_de_revision(curso / a / "r1i") for a in ("ana", "beto", "caro", "dani")}
 
 
-@pytest.fixture(params=["weyl", "dredd"])
+def _weyl_hermano(monkeypatch):
+    raiz_weyl = Path(__file__).resolve().parents[2] / "weyl" / "src"
+    if raiz_weyl.is_dir():
+        monkeypatch.syspath_prepend(str(raiz_weyl))
+
+
+@pytest.fixture(params=["weyl-ast", "weyl", "dredd"])
 def con_motor(request, monkeypatch):
+    _weyl_hermano(monkeypatch)
+    if request.param == "weyl-ast":
+        pytest.importorskip("weyl.core.similitud_ast")
+        return request.param
+    monkeypatch.setitem(sys.modules, "weyl.core.similitud_ast", None)
     if request.param == "weyl":
-        raiz_weyl = Path(__file__).resolve().parents[2] / "weyl" / "src"
-        if raiz_weyl.is_dir():
-            monkeypatch.syspath_prepend(str(raiz_weyl))
         pytest.importorskip("weyl.core.alpha_equiv")
     else:
         monkeypatch.setitem(sys.modules, "weyl.core.alpha_equiv", None)
@@ -163,3 +171,74 @@ def test_cli(curso, tmp_path):
     res = runner.invoke(app, ["cluster-errors", str(curso), "--similitud", "--umbral", "99"])
     assert res.exit_code == 0, res.output
     assert "ana, beto" not in res.output and "caro, beto" not in res.output and "beto, caro" in res.output
+
+
+# Ola 48: el motor de AST de weyl (el pin de dredd puede traer una versión sin él).
+@pytest.fixture
+def con_ast(monkeypatch):
+    _weyl_hermano(monkeypatch)
+    pytest.importorskip("weyl.core.similitud_ast")
+
+
+def _cohorte(tmp_path):
+    raiz = tmp_path / "tp1"
+    for alumno, codigo in (("ana", ORIGINAL), ("beto", MAQUILLADO), ("caro", DISTINTO)):
+        (raiz / alumno).mkdir(parents=True)
+        (raiz / alumno / "main.c").write_text(codigo, encoding="utf-8")
+    return raiz
+
+
+def test_con_weyl_la_matriz_es_completa_y_sobre_el_ast(tmp_path, con_ast):
+    raiz = _cohorte(tmp_path)
+    datos = agrupar({a: [raiz / a / "main.c"] for a in ("ana", "beto", "caro")}, umbral=90)
+    assert datos["motor"] == "weyl-ast"
+    assert datos["matriz"]["ana"]["beto"] == 100.0 and datos["matriz"]["ana"]["caro"] < 40.0
+    assert [g["alumnos"] for g in datos["grupos"]] == [["ana", "beto"]]
+    assert "sobre el AST" in informe_markdown(datos)
+
+
+def test_sin_el_motor_de_ast_se_usa_el_texto(tmp_path, monkeypatch):
+    monkeypatch.setattr("dredd.core.similitud.lote_ast", lambda: None)
+    raiz = _cohorte(tmp_path)
+    datos = agrupar({a: [raiz / a / "main.c"] for a in ("ana", "beto", "caro")}, umbral=90)
+    assert datos["motor"] in ("weyl", "dredd") and "matriz" not in datos
+    assert [g["alumnos"] for g in datos["grupos"]] == [["ana", "beto"]]
+    assert informe_markdown(datos)
+
+
+def test_cruzar_muestra_el_par_que_winnowing_no_ve():
+    from dredd.core.plagiarism import SimilarityMatch
+    from dredd.core.similitud import cruzar
+
+    lexico = [SimilarityMatch("caro", "ana", 70.0, 7, 10, 10)]
+    estructural = {"matriz": {"ana": {"beto": 100.0, "caro": 40.0}, "beto": {"ana": 100.0}, "caro": {"ana": 40.0}},
+                   "pares": [{"a": "ana", "b": "beto", "similitud_pct": 100.0}]}
+    assert cruzar(lexico, estructural) == [
+        {"a": "ana", "b": "beto", "lexica_pct": None, "estructural_pct": 100.0},
+        {"a": "ana", "b": "caro", "lexica_pct": 70.0, "estructural_pct": 40.0},
+    ]
+
+
+def test_cli_plagiarism_estructural(tmp_path, monkeypatch, con_ast):
+    raiz = _cohorte(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    matriz = tmp_path / "salida" / "matriz.csv"
+    res = runner.invoke(app, ["plagiarism", str(raiz), "--estructural", "--matriz", str(matriz)], env={"COLUMNS": "150"})
+    assert res.exit_code == 0, res.output
+    assert "Cruce Winnowing y AST" in res.output and "100.0%" in res.output
+    assert matriz.read_text(encoding="utf-8").startswith("entrega,ana,beto,caro\n")
+
+
+def test_cli_plagiarism_estructural_sin_weyl_lo_dice(tmp_path, monkeypatch):
+    monkeypatch.setattr("dredd.core.similitud.lote_ast", lambda: None)
+    raiz = _cohorte(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    res = runner.invoke(app, ["plagiarism", str(raiz), "--estructural"], env={"COLUMNS": "150"})
+    assert res.exit_code == 1 and "ecosistema" in res.output
+
+
+def test_cli_cluster_errors_escribe_la_matriz(curso, tmp_path, con_ast):
+    matriz = tmp_path / "salida" / "matriz.csv"
+    res = runner.invoke(app, ["cluster-errors", str(curso), "--matriz", str(matriz), "--json"])
+    assert res.exit_code == 0, res.output
+    assert matriz.read_text(encoding="utf-8").startswith("entrega,")

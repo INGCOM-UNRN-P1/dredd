@@ -4,6 +4,10 @@ Agrupa las entregas que son el mismo programa salvo nombres, comentarios, format
 funciones, para que el docente mire esos grupos a mano. Es la misma medida que `weyl similarity`
 (dos archivos), llevada a todo el curso:
 
+Con weyl instalado, la comparación es la de `weyl cohort` (Ola 48): la bolsa de subárboles del AST de
+cada entrega, sin lo que comparte la mayoría, y el coeficiente de Dice, con la matriz completa. Una versión de weyl sin
+ese motor, o weyl sin instalar, usan la forma canónica de texto:
+
 - tree-sitter separa cada entrega en sus definiciones de primer nivel (funciones, structs,
   globales); los comentarios, los `#include` y los prototipos no cuentan.
 - Cada definición se normaliza por separado con la alfa-equivalencia de weyl (los identificadores
@@ -40,6 +44,32 @@ def motor() -> Tuple[str, Callable[[str], str]]:
 
         return "dredd", lambda codigo: " ".join(t for t, _ in tokenize_c_code(codigo))
     return "weyl", lambda codigo: normalizar_alpha_equivalencia(eliminar_comentarios(codigo))
+
+
+def lote_ast() -> Optional[Callable[..., Dict[str, Any]]]:
+    """`comparar_lote` de weyl, si la versión instalada lo trae."""
+    try:
+        from weyl.core.similitud_ast import comparar_lote
+    except ImportError:
+        return None
+    return comparar_lote
+
+
+def _agrupar_ast(comparar: Callable[..., Dict[str, Any]], entregas: Mapping[str, Iterable[Path]],
+                 umbral: float, plantilla: Optional[Path]) -> Dict[str, Any]:
+    """El resultado de weyl con los nombres de este informe (y sin los pares de funciones)."""
+    datos = comparar(entregas, umbral=umbral, plantilla=plantilla)
+    grupos = [{"alumnos": g["entregas"], "similitud_min": g["similitud_min"],
+               "similitud_max": g["similitud_max"], "matriz": g["matriz"]} for g in datos["grupos"]]
+    return {
+        "motor": datos["motor"],
+        "umbral_pct": umbral,
+        "estudiantes": datos["entregas"],
+        "sin_codigo": datos["sin_codigo"],
+        "grupos": grupos,
+        "pares": [{"a": p["a"], "b": p["b"], "similitud_pct": p["similitud_pct"]} for p in datos["pares"]],
+        "matriz": datos["matriz"],
+    }
 
 
 def fuentes_de_revision(rni_dir: Path) -> List[Path]:
@@ -98,6 +128,10 @@ def _supera(a: str, b: str, umbral: float) -> Optional[float]:
 def agrupar(entregas: Mapping[str, Iterable[Path]], umbral: float = 90.0,
             plantilla: Optional[Path] = None) -> Dict[str, Any]:
     """Grupos de entregas con similitud ≥ `umbral` (porcentaje) y su matriz de similitud."""
+    entregas = {alumno: [p for p in archivos if p.is_file()] for alumno, archivos in entregas.items()}
+    comparar = lote_ast()
+    if comparar is not None:
+        return _agrupar_ast(comparar, entregas, umbral, plantilla)
     nombre_motor, normalizar = motor()
     stripper = None
     if plantilla is not None:
@@ -126,6 +160,7 @@ def agrupar(entregas: Mapping[str, Iterable[Path]], umbral: float = 90.0,
             a = padre[a]
         return a
 
+    # Sin el motor de AST no hay matriz completa: el cálculo cuadrático sólo se hace sobre el umbral.
     pares = []
     for a, b in combinations(sorted(formas), 2):
         valor = _supera(formas[a], formas[b], umbral)
@@ -156,12 +191,38 @@ def agrupar(entregas: Mapping[str, Iterable[Path]], umbral: float = 90.0,
     }
 
 
+_NORMALIZACION = {
+    "weyl-ast": "sobre el AST (weyl)",
+    "weyl": "de weyl (alfa-equivalencia)",
+    "dredd": "de dredd (weyl no está instalado)",
+}
+
+
+def cruzar(lexicos: Iterable[Any], estructural: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """Winnowing y AST lado a lado: cada par que supera al menos uno de los dos umbrales.
+
+    `lexica_pct` es None si el par no llegó al umbral léxico. Un par con AST alto y léxica baja es
+    la señal que más interesa: el mismo programa, con otro texto.
+    """
+    matriz = estructural["matriz"]
+    pares: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for m in lexicos:
+        a, b = sorted((m.student_a, m.student_b))
+        pares[(a, b)] = {"a": a, "b": b, "lexica_pct": m.similarity_pct,
+                         "estructural_pct": matriz.get(a, {}).get(b)}
+    for p in estructural["pares"]:
+        a, b = sorted((p["a"], p["b"]))
+        pares.setdefault((a, b), {"a": a, "b": b, "lexica_pct": None, "estructural_pct": p["similitud_pct"]})
+    return sorted(pares.values(), key=lambda p: (-(p["estructural_pct"] or 0.0), -(p["lexica_pct"] or 0.0),
+                                                 p["a"], p["b"]))
+
+
 def informe_markdown(datos: Dict[str, Any]) -> str:
     """El informe docente: los grupos y su matriz de similitud, sin código de las entregas."""
     lineas = [
         "# Similitud estructural de la cohorte\n",
         f"{datos['estudiantes']} entregas comparadas; umbral {datos['umbral_pct']:g} %; normalización "
-        f"{'de weyl (alfa-equivalencia)' if datos['motor'] == 'weyl' else 'de dredd (weyl no está instalado)'}. "
+        f"{_NORMALIZACION[datos['motor']]}. "
         "Cada grupo reúne entregas que, salvo nombres, comentarios, formato y orden de las funciones, "
         "son el mismo programa: revisalas a mano antes de sacar conclusiones (una consigna muy guiada "
         "también produce soluciones parecidas).\n",

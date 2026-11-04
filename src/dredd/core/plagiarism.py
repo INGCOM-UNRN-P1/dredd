@@ -69,6 +69,21 @@ def compute_winnowing_fingerprints(tokens: List[Tuple[str, int]], k: int = 8, w:
     return fingerprints
 
 
+def directorios_de_entrega(submissions_dir: Path) -> List[Path]:
+    """Una carpeta por estudiante: lo que no es una entrega queda afuera."""
+    return [
+        d for d in sorted(submissions_dir.iterdir())
+        if d.is_dir()
+        and not d.name.startswith((".", "_"))
+        and d.name not in ("guia", "guide", "templates", "informe", "baseline", "_baseline")
+    ]
+
+
+def entregas_de_cohorte(submissions_dir: Path) -> Dict[str, List[Path]]:
+    """Los `.c` de cada estudiante: los mismos que lee el detector de Winnowing."""
+    return {d.name: sorted(d.glob("**/*.c")) for d in directorios_de_entrega(submissions_dir)}
+
+
 @dataclass
 class SimilarityMatch:
     student_a: str
@@ -164,12 +179,7 @@ class PlagiarismDetector:
         if not submissions_dir.is_dir():
             return []
 
-        student_dirs = [
-            d for d in sorted(submissions_dir.iterdir())
-            if d.is_dir()
-            and not d.name.startswith((".", "_"))
-            and d.name not in ("guia", "guide", "templates", "informe", "baseline", "_baseline")
-        ]
+        student_dirs = directorios_de_entrega(submissions_dir)
         student_fps: Dict[str, Set[int]] = {}
 
         for s_dir in student_dirs:

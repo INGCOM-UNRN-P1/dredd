@@ -175,7 +175,12 @@ Calcula la matriz de similitud de código fuente normalizado en todas las entreg
 ```bash
 dredd plagiarism tp01_1228009                    # umbral de checks.plagiarism.threshold (dredd.yaml)
 dredd plagiarism tp01_1228009 --threshold 0.70
+dredd plagiarism tp01_1228009 --estructural --matriz matriz.csv
 ```
+
+`--estructural` cruza cada par con la similitud del AST de `weyl cohort`, con la matriz completa en
+CSV. Un par con AST alto y Winnowing bajo es el mismo programa con otro texto. Es un indicio para
+mirar a mano: una consigna muy guiada también produce soluciones parecidas.
 
 #### Encapsulamiento de TDAs (motoko)
 En las actividades de TDAs dredd corre `motoko check --json` sobre cada ejercicio completado (o sobre la
@@ -240,11 +245,12 @@ dredd cluster-errors informes/tp01 --top 10
 ```
 
 Con `--similitud` agrupa además las entregas que son el mismo programa salvo nombres,
-comentarios, formato, prototipos u orden de las funciones (la medida de `weyl similarity`, con el
-árbol sintáctico de tree-sitter): cada definición se normaliza por alfa-equivalencia y se compara.
-`--informe` escribe el informe docente con la matriz de similitud de cada grupo, sin código de las
-entregas; `--plantilla` descuenta el código que dio la cátedra. La normalización de weyl viene con
-el extra `ecosistema`; sin él se usan los tokens del detector de plagio de dredd.
+comentarios, formato, prototipos u orden de las funciones. La medida es la de `weyl cohort`: la
+bolsa de subárboles del AST de cada entrega, sin lo que comparte la mayoría de la cohorte. `--informe` escribe el informe docente con la matriz de
+similitud de cada grupo, sin código de las entregas; `--matriz` escribe en CSV la matriz completa de
+la cohorte; `--plantilla` descuenta el código que dio la cátedra. weyl viene con el extra
+`ecosistema`. Con una versión de weyl sin `weyl cohort` se compara el texto normalizado, y sin weyl,
+los tokens del detector de plagio de dredd: en esos dos casos no hay `--matriz`.
 
 ```bash
 dredd cluster-errors informes/tp01 --similitud --umbral 90 --plantilla tp01/plantilla.c --informe similitud.md

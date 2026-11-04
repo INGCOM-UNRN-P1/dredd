@@ -26,8 +26,15 @@ def cmd_plagiarism(
     strip_template: Optional[Path] = typer.Option(None, "--strip-template",
         help="boiler-strip: plantilla/archivo(s) de cátedra a eliminar antes de calcular similitud."),
     html: Optional[Path] = typer.Option(None, "--html", help="Ruta del reporte HTML interactivo con matriz y diff lado a lado."),
+    estructural: bool = typer.Option(False, "--estructural", help="Cruzar con la similitud del AST de weyl: ve el mismo programa con otros nombres y otro orden."),
+    umbral_estructural: float = typer.Option(90.0, "--umbral-estructural", min=0.0, max=100.0, help="Similitud del AST (%) a partir de la cual se informa un par."),
+    matriz: Optional[Path] = typer.Option(None, "--matriz", help="Con --estructural, escribir la matriz completa del AST en este CSV."),
 ) -> None:
-    """Calcula la matriz de similitud Winnowing entre todas las entregas descargadas."""
+    """Calcula la matriz de similitud Winnowing entre todas las entregas descargadas.
+
+    Con `--estructural`, cruza cada par con la similitud del AST de weyl. Una similitud alta es un
+    indicio para mirar a mano, no una prueba de copia.
+    """
     exercise_slug, submissions_dir = resolve_submissions_dir(Path.cwd(), exercise)
     if not submissions_dir.is_dir():
         console.print(f"[bold red]Directorio inexistente: {submissions_dir}[/bold red]")
@@ -48,6 +55,12 @@ def cmd_plagiarism(
 
     detector = PlagiarismDetector(threshold=threshold, plantilla=strip_template)
     matches = detector.analyze_submissions(submissions_dir, buscar_plantilla=quitar_plantilla)
+
+    if estructural:
+        _cruce_estructural(submissions_dir, matches, exercise_slug, umbral_estructural, matriz,
+                           strip_template, quitar_plantilla)
+    elif matriz:
+        console.print("[yellow]--matriz necesita --estructural: no se escribió.[/yellow]")
 
     if not matches:
         console.print(f"\n[bold green]✓ No se detectaron pares con similitud superior al {threshold*100:.0f}%.[/bold green]\n")
@@ -72,6 +85,38 @@ def cmd_plagiarism(
         from dredd.core.plagiarism import generate_plagiarism_html_report
         generate_plagiarism_html_report(submissions_dir, matches, html)
         console.print(f"\n[bold green]✓ Reporte HTML interactivo generado en:[/bold green] [cyan]{html}[/cyan]\n")
+
+
+def _cruce_estructural(submissions_dir: Path, matches: List[Any], exercise_slug: str, umbral: float,
+                       matriz: Optional[Path], plantilla: Optional[Path], quitar_plantilla: bool) -> None:
+    from dredd.core.plagiarism import entregas_de_cohorte
+    from dredd.core.similitud import agrupar, cruzar, lote_ast
+
+    if lote_ast() is None:
+        console.print("[bold red]--estructural necesita weyl con `weyl cohort` (extra «ecosistema» de dredd).[/bold red]")
+        raise typer.Exit(code=1)
+    if plantilla is None and quitar_plantilla:
+        from dredd.core.baseline import find_baseline_dir
+        plantilla = find_baseline_dir(submissions_dir)
+    datos = agrupar(entregas_de_cohorte(submissions_dir), umbral=umbral, plantilla=plantilla)
+    if matriz:
+        from weyl.core.similitud_ast import matriz_csv
+
+        matriz.parent.mkdir(parents=True, exist_ok=True)
+        matriz.write_text(matriz_csv(datos["matriz"]), encoding="utf-8")
+        console.print(f"[dim]Matriz del AST: {matriz}[/dim]")
+    pares = cruzar(matches, datos)
+    if not pares:
+        console.print(f"[green]Ningún par supera el {umbral:g} % de similitud del AST.[/green]")
+        return
+    tabla = Table(title=f"Cruce Winnowing y AST — {exercise_slug}")
+    for columna in ("Estudiante A", "Estudiante B", "Winnowing", "AST"):
+        tabla.add_column(columna)
+    for par in pares:
+        lexica = f"{par['lexica_pct']:.1f}%" if par["lexica_pct"] is not None else "bajo el umbral"
+        ast = f"{par['estructural_pct']:.1f}%" if par["estructural_pct"] is not None else "—"
+        tabla.add_row(par["a"], par["b"], lexica, ast)
+    console.print(tabla)
 
 
 def cmd_map(
@@ -395,6 +440,7 @@ def cmd_cluster_errors(
     umbral: float = typer.Option(90.0, "--umbral", min=0.0, max=100.0, help="Similitud (%) a partir de la cual dos entregas van al mismo grupo."),
     plantilla: Optional[Path] = typer.Option(None, "--plantilla", exists=True, help="Código de la cátedra (plantilla) a descontar antes de comparar."),
     informe: Optional[Path] = typer.Option(None, "--informe", help="Escribir el informe docente de similitud en Markdown (grupos y matriz, sin código)."),
+    matriz: Optional[Path] = typer.Option(None, "--matriz", help="Escribir en este CSV la matriz completa de la cohorte (necesita weyl con `weyl cohort`)."),
 ) -> None:
     """Errores y temas más frecuentes de la cohorte: cuántos estudiantes distintos tuvieron cada uno.
 
@@ -404,7 +450,7 @@ def cmd_cluster_errors(
     from dredd.core.cohorte import agrupar_cohorte, ultimas_revisiones
 
     datos = agrupar_cohorte(raiz)
-    if con_similitud or informe:
+    if con_similitud or informe or matriz:
         from dredd.core.similitud import agrupar, fuentes_de_revision, informe_markdown
 
         entregas = {alumno.name: fuentes_de_revision(archivo.parent) for alumno, archivo in ultimas_revisiones(raiz).items()}
@@ -412,6 +458,14 @@ def cmd_cluster_errors(
         if informe:
             informe.parent.mkdir(parents=True, exist_ok=True)
             informe.write_text(informe_markdown(datos["similitud"]), encoding="utf-8")
+        if matriz:
+            if "matriz" not in datos["similitud"]:
+                console.print("[bold red]--matriz necesita weyl con `weyl cohort` (extra «ecosistema» de dredd).[/bold red]")
+                raise typer.Exit(code=1)
+            from weyl.core.similitud_ast import matriz_csv
+
+            matriz.parent.mkdir(parents=True, exist_ok=True)
+            matriz.write_text(matriz_csv(datos["similitud"]["matriz"]), encoding="utf-8")
     if json_output:
         print(json.dumps(datos, indent=2, ensure_ascii=False))
         return
@@ -435,7 +489,7 @@ def cmd_cluster_errors(
 
 
 def _mostrar_similitud(sim: Dict[str, Any], informe: Optional[Path]) -> None:
-    tabla = Table(title=f"Entregas estructuralmente equivalentes (≥ {sim['umbral_pct']:g} %, normalización de {sim['motor']})")
+    tabla = Table(title=f"Entregas estructuralmente equivalentes (≥ {sim['umbral_pct']:g} %, motor {sim['motor']})")
     for columna in ("Grupo", "Entregas", "Similitud %"):
         tabla.add_column(columna)
     for i, g in enumerate(sim["grupos"], 1):
@@ -444,7 +498,7 @@ def _mostrar_similitud(sim: Dict[str, Any], informe: Optional[Path]) -> None:
         console.print(tabla)
     else:
         console.print(f"[green]Ninguna entrega supera el {sim['umbral_pct']:g} % de similitud estructural.[/green]")
-    if sim["motor"] != "weyl":
+    if sim["motor"] == "dredd":
         console.print("[dim]weyl no está instalado: se comparó con los tokens de dredd (instalá el extra «ecosistema»).[/dim]")
     if informe:
         console.print(f"[dim]Informe con la matriz de cada grupo: {informe}[/dim]")
