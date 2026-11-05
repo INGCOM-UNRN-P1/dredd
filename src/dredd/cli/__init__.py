@@ -44,6 +44,7 @@ from dredd.cli.exportacion import (  # noqa: F401
     cmd_export_guarani,
     cmd_export_report,
     cmd_moodle_export,
+    cmd_moodle_paquete,
     cmd_moodle_ingest,
     cmd_report_template,
     cmd_sanitize_output,
@@ -77,6 +78,7 @@ moodle_app.command('ingest')(cmd_moodle_ingest)
 app.command('export')(cmd_export)
 app.command('export-report')(cmd_export_report)
 moodle_app.command('export')(cmd_moodle_export)
+moodle_app.command('paquete')(cmd_moodle_paquete)
 app.command('fuzz-gen')(fuzz_gen)
 deckard_app.command('sync')(cmd_deckard_sync)
 app.command('oral-guide')(oral_guide)

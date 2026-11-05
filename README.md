@@ -165,6 +165,30 @@ dredd export tp01_1228009
 dredd moodle export -e tp01 -o calificaciones.csv
 ```
 
+#### Paquete para el calificador de Moodle (`dredd moodle paquete`)
+Lleva a Moodle las notas de `deckard exercise rubric --eval-results` y sus devoluciones. Se parte de
+la hoja de calificaciones de la tarea, porque Moodle busca sus encabezados y el identificador en el
+idioma de la cuenta y el número de participante es interno de la tarea.
+
+```bash
+# 1. En la tarea de Moodle: Calificaciones → «Descargar hoja de calificaciones»
+dredd moodle paquete --planilla Calificaciones.csv --notas calificaciones/calificaciones.csv \
+    --mapa mapa.csv -o moodle/
+# 2. En la tarea: «Subir hoja de calificaciones» (moodle/planilla_moodle.csv)
+#    y «Subir múltiples archivos de retroalimentación en un ZIP» (moodle/devoluciones_moodle.zip)
+```
+
+- **Requisitos de la tarea:** tener activos «Hoja de calificaciones fuera de línea», «Comentarios de
+  retroalimentación» y «Archivos de retroalimentación». Moodle desactiva la hoja si la tarea usa
+  calificación avanzada (rúbrica o guía de Moodle).
+- **`--mapa`:** CSV `alumno,dato`, con el identificador, el correo o el nombre en Moodle. Hace falta
+  para las entregas de GitHub Classroom. Con una ingesta de Moodle, el número ya viene en la carpeta.
+  Un estudiante sin coincidencia exacta queda afuera y el comando sale con 1.
+- **Notas provisorias:** dejan la fila intacta, comentario incluido. `--incluir-provisorias` las suma.
+- **Escala:** la nota de deckard es sobre 10 y se reescala a la calificación máxima de la tarea. Si la
+  planilla no la trae, hay que indicarla con `--maximo`.
+- **Volver a descargar:** Moodle ignora una fila si la nota cambió allá después de bajar la planilla.
+
 ---
 
 ### 3. Herramientas de Auditoría y Reportes

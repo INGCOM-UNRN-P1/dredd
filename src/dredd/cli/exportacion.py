@@ -40,6 +40,14 @@ def cmd_moodle_ingest(
         console.print("      3. Ajustá las políticas de verificación en 'checks:' si corresponde.\n")
 
 
+def _avisar_sin_participante(exporter, activity: str) -> None:
+    """Moodle descarta una fila sin número de participante: sin este aviso, el CSV parece bueno."""
+    faltan = exporter.filas_sin_participante(activity)
+    if faltan:
+        console.print(f"[yellow]⚠ {faltan} fila(s) sin número de participante de Moodle (entregas de GitHub): "
+                      "Moodle no las va a importar. Usá [bold]dredd moodle paquete[/bold].[/yellow]\n")
+
+
 def cmd_export(
     activity: str = typer.Argument(..., help="Nombre / slug de la actividad a exportar."),
     csv_out: Optional[Path] = typer.Option(None, "--csv", "-c", help="Ruta del CSV de calificaciones Moodle."),
@@ -59,6 +67,7 @@ def cmd_export(
         console.print(f"  · Libro de calificaciones: [cyan]{csv_file}[/cyan]")
         console.print(f"  · Paquete ZIP de retroalimentación: [cyan]{zip_file}[/cyan]")
         console.print(f"  · Dashboard de cohorte: [cyan]{dash_file}[/cyan]\n")
+        _avisar_sin_participante(exporter, activity)
     except Exception as e:
         console.print(f"[bold red]Error durante la exportación:[/bold red] {e}")
         raise typer.Exit(code=1) from e
@@ -92,9 +101,48 @@ def cmd_moodle_export(
     try:
         csv_file = exporter.export_grades_csv(exercise, output_file=output)
         console.print(f"\n[bold green]✓ Planilla generada en: {csv_file}[/bold green]\n")
+        _avisar_sin_participante(exporter, exercise)
     except Exception as e:
         console.print(f"[bold red]Error al exportar planilla Moodle:[/bold red] {e}")
         raise typer.Exit(code=1) from e
+
+
+def cmd_moodle_paquete(
+    planilla: Path = typer.Option(..., "--planilla", "-p", exists=True, dir_okay=False, help="Hoja de calificaciones descargada de la tarea de Moodle."),
+    notas: Path = typer.Option(Path("calificaciones/calificaciones.csv"), "--notas", "-n", exists=True, dir_okay=False, help="calificaciones.csv de deckard exercise rubric."),
+    devoluciones: Optional[Path] = typer.Option(None, "--devoluciones", "-d", help="Carpeta de devoluciones Markdown (por omisión, devoluciones/ junto a las notas)."),
+    mapa: Optional[Path] = typer.Option(None, "--mapa", "-m", exists=True, dir_okay=False, help="CSV alumno,dato en Moodle (identificador, correo o nombre), para entregas de GitHub."),
+    salida: Path = typer.Option(Path("moodle"), "--salida", "-o", help="Carpeta del paquete."),
+    incluir_provisorias: bool = typer.Option(False, "--incluir-provisorias", help="Importar también las notas provisorias."),
+    maximo: Optional[float] = typer.Option(None, "--maximo", min=0.01, help="Calificación máxima de la tarea, si la planilla no la trae."),
+    columna_nota: Optional[str] = typer.Option(None, "--columna-nota", help="Encabezado de la nota, si no se detecta."),
+    columna_comentarios: Optional[str] = typer.Option(None, "--columna-comentarios", help="Encabezado de los comentarios, si no se detecta."),
+) -> None:
+    """Arma el paquete para el calificador de Moodle desde las notas y devoluciones de deckard.
+
+    Completa la hoja de calificaciones de la tarea y empaqueta las devoluciones en HTML. Las notas
+    provisorias dejan su fila intacta. Sale con 1 si un estudiante no se pudo vincular.
+    """
+    from dredd.core.moodle_paquete import PaqueteError, armar_paquete
+
+    try:
+        res = armar_paquete(planilla, notas, salida, devoluciones, mapa, incluir_provisorias, maximo,
+                            columna_nota, columna_comentarios)
+    except PaqueteError as e:
+        console.print(f"[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(code=1) from e
+    console.print(f"[bold green]✓ {len(res.importadas)} nota(s) en[/bold green] [cyan]{res.planilla}[/cyan]")
+    if res.zip:
+        console.print(f"[bold green]✓ Devoluciones en[/bold green] [cyan]{res.zip}[/cyan]")
+    if res.provisorias:
+        console.print(f"[yellow]⚠ Sin importar, por provisorias: {', '.join(res.provisorias)}[/yellow]")
+    if res.sin_devolucion:
+        console.print(f"[yellow]⚠ Sin devolución en el ZIP: {', '.join(res.sin_devolucion)}[/yellow]")
+    console.print(f"[dim]Filas de la planilla sin tocar: {res.filas_sin_nota}[/dim]")
+    if res.sin_vincular:
+        console.print(f"[bold red]✗ Sin vincular con la planilla: {', '.join(res.sin_vincular)}[/bold red]\n"
+                      "  Agregalos al --mapa (alumno,identificador, correo o nombre en Moodle).")
+        raise typer.Exit(code=1)
 
 
 def cmd_export_guarani(

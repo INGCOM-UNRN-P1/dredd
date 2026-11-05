@@ -226,6 +226,23 @@ Exporta calificaciones CSV, paquete ZIP de retroalimentación y dashboard consol
 dredd export <activity>
 ```
 
+### `dredd moodle paquete`
+
+Arma el paquete para el calificador de Moodle desde las notas y devoluciones de deckard: completa la
+hoja de calificaciones de la tarea (`planilla_moodle.csv`) y empaqueta las devoluciones en HTML
+(`devoluciones_moodle.zip`). Sale con 1 si un estudiante no se pudo vincular. Ver el README.
+
+| Opción | Por Defecto | Descripción |
+| :--- | :--- | :--- |
+| `--planilla`, `-p` | obligatoria | Hoja de calificaciones descargada de la tarea. |
+| `--notas`, `-n` | `calificaciones/calificaciones.csv` | Notas de `deckard exercise rubric`. |
+| `--devoluciones`, `-d` | `devoluciones/` junto a las notas | Devoluciones Markdown. |
+| `--mapa`, `-m` | `None` | CSV `alumno,dato en Moodle`. |
+| `--salida`, `-o` | `moodle` | Carpeta del paquete. |
+| `--incluir-provisorias` | `False` | Importar también las notas provisorias. |
+| `--maximo` | de la planilla | Calificación máxima de la tarea. |
+| `--columna-nota`, `--columna-comentarios` | detectadas | Encabezados, si no se detectan. |
+
 ### `dredd export-report`
 
 Convierte un informe Markdown a HTML autocontenido enriquecido o PDF (zero-dependencies).

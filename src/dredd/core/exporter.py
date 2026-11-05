@@ -156,6 +156,10 @@ class MoodleExporter:
 
         return students_data
 
+    def filas_sin_participante(self, activity_slug: str) -> int:
+        """Estudiantes sin número de participante de Moodle, como las entregas de GitHub."""
+        return sum(str(item["submission_id"]) in ("", "0", "None") for item in self._get_all_activity_data(activity_slug))
+
     def export_grades_csv(
         self,
         activity_slug: str,
