@@ -246,7 +246,7 @@ def fuzz_gen(
     salida: Path = typer.Option(Path("casos"), "--salida", "-o",
                                 help="Directorio destino de los pares caso_NN.in/.out."),
     spec: Optional[Path] = typer.Option(None, "--spec", help="spec.yaml opcional (tipo_entrada, semillas_extra, tamano_max)."),
-    cantidad: int = typer.Option(12, "--cantidad", "-n", help="Máximo de testcases a generar."),
+    cantidad: int = typer.Option(12, "--cantidad", "-n", help="Máximo de casos de prueba a generar."),
     segundos: int = typer.Option(15, "--segundos", help="Tiempo de fuzzing si hay clang/libFuzzer."),
     sin_libfuzzer: bool = typer.Option(False, "--sin-libfuzzer", help="Fuerza el modo determinista."),
 ):

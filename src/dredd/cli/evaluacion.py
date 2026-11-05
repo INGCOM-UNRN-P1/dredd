@@ -705,7 +705,7 @@ def cmd_eval_stability(
     binario: Path = typer.Argument(..., exists=True, help="Ruta al binario ejecutable C."),
     repeticiones: int = typer.Option(5, "--repeticiones", "-n", help="Número de ejecuciones consecutivas."),
     input_data: str = typer.Option("", "--input", "-i", help="Datos de entrada stdin para el proceso."),
-    timeout: float = typer.Option(3.0, "--timeout", "-t", help="Timeout por corrida en segundos."),
+    timeout: float = typer.Option(3.0, "--timeout", "-t", help="Tiempo límite por corrida en segundos."),
     json_output: bool = typer.Option(False, "--json", help="Salida en formato JSON."),
 ) -> None:
     """Evalúa la estabilidad temporal y determinismo de una solución mediante corridas reiteradas."""
@@ -734,7 +734,7 @@ def cmd_cohort_bench(
     entregas: Path = typer.Argument(..., exists=True, help="Directorio contenedor de las entregas de la cohorte."),
     binario: str = typer.Option("main", "--bin", "-b", help="Nombre del archivo binario ejecutable a comparar."),
     input_data: str = typer.Option("", "--input", "-i", help="Datos de entrada para el benchmark."),
-    timeout: float = typer.Option(5.0, "--timeout", "-t", help="Timeout máximo por entrega en segundos."),
+    timeout: float = typer.Option(5.0, "--timeout", "-t", help="Tiempo límite por entrega en segundos."),
     json_output: bool = typer.Option(False, "--json", help="Salida en formato JSON."),
 ) -> None:
     """Ejecuta benchmarking algorítmico comparativo de CPU y memoria en toda la cohorte."""
@@ -767,7 +767,7 @@ def cmd_cohort_bench(
 def cmd_smith_adversary(
     target: Path = typer.Argument(..., exists=True, help="Ruta a binario ejecutable o directorio de tests para inyección."),
     inject: bool = typer.Option(False, "--inject", help="Inyectar casos adversarios .in en la carpeta destino."),
-    timeout: float = typer.Option(2.0, "--timeout", "-t", help="Timeout por caso adversario en segundos."),
+    timeout: float = typer.Option(2.0, "--timeout", "-t", help="Tiempo límite por caso adversario en segundos."),
     json_output: bool = typer.Option(False, "--json", help="Salida en formato JSON."),
 ) -> None:
     """Genera e inyecta casos de prueba adversarios y de estrés (integración smith)."""
@@ -813,7 +813,7 @@ def cmd_smith_adversary(
 def cmd_eval_shielded(
     cmd: str = typer.Argument(..., help="Comando binario a ejecutar en sandbox blindado."),
     input_data: str = typer.Option("", "--input", "-i", help="Entrada stdin."),
-    timeout: float = typer.Option(3.0, "--timeout", "-t", help="Timeout máximo en segundos."),
+    timeout: float = typer.Option(3.0, "--timeout", "-t", help="Tiempo límite en segundos."),
     memoria_mb: int = typer.Option(48, "--memory", "-m", help="Límite estricto de memoria en MB."),
 ) -> None:
     """Ejecuta un proceso bajo el modo 'Sandbox Blindado' con corte total de red y namespaces aislados."""
@@ -829,7 +829,7 @@ def cmd_eval_shielded(
     )
     console.print(f"[bold cyan]Código de salida:[/bold cyan] {retcode}")
     if timed_out:
-        console.print("[bold red]Ejecución interrumpida por límite de recursos o timeout.[/bold red]")
+        console.print("[bold red]Ejecución interrumpida por límite de recursos o de tiempo.[/bold red]")
     if out:
         console.print(f"[bold green]STDOUT:[/bold green]\n{out}")
     if err:

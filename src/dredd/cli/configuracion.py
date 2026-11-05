@@ -312,7 +312,7 @@ def cmd_config_preset(
         console.print("  • Brett: 0 bytes de padding desperdiciado tolerado en structs")
         console.print("  • Bishop: Detección estricta de cualquier fuga de memoria (0 leaks)")
         console.print("  • Drake: Fuzzing de límites numéricos (INT_MAX/MIN) y strings vacíos")
-        console.print("  • Sandbox: 32 MB RAM / 3.0s timeout / Fallo bloqueante en leaks o sanitizers\n")
+        console.print("  • Sandbox: 32 MB RAM / tiempo límite de 3.0s / Fallo bloqueante en leaks o sanitizers\n")
     else:
         console.print(f"[bold red]Preset desconocido: '{preset_name}'. Disponibles: strict.[/bold red]")
         raise typer.Exit(code=1)

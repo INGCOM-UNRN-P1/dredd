@@ -271,7 +271,7 @@ def generar_testcases(fuente_modelo: Path, dir_salida: Path,
             rc, salida = ejecutar_modelo(binario, candidato + "\n")
             salida_norm = normalizar_salida(salida)
             if rc == 124:
-                resultado.crashes.append(f"timeout con entrada: {candidato!r:.60}")
+                resultado.crashes.append(f"tiempo límite con entrada: {candidato!r:.60}")
                 continue
             if rc != 0:
                 resultado.crashes.append(
